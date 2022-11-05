@@ -32,7 +32,7 @@
 (mem #x4000 #'ppu:rd #'ppu:wrt)
 (mem #x4020 #'io:rd #'io:wrt)
 (mem #x8000 #'rom-read #'cart-write)
-(mem #x10000 #'rom-read #'mapper:wrt)
+(mem #x10000 #'rom-read #'map:wrt)
 
 (defconstant +nmi-vector+ #xFFFA)
 (defconstant +reset-vector+ #xFFFC)
