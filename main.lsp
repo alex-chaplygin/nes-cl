@@ -1,0 +1,5 @@
+(load "ppu.lsp")
+(load "io.lsp")
+(load "mmc1.lsp")
+(load "map.lsp")
+(load "mem.lsp")

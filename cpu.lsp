@@ -25,14 +25,12 @@
 (make "neg" 7)
 
 (defun st-push (v)
-  (progn
-    (mem:wrt (+ #x100 SP) v)
-    (decb SP)))
+  (mem:wrt (+ #x100 SP) v)
+  (decb SP))
 
 (defun st-pop ()
-  (progn
-    (incb SP)
-    (mem:rd (+ #x100 SP))))
+  (incb SP)
+  (mem:rd (+ #x100 SP)))
 
 (defmacro incb (v)
   `(progn
@@ -62,84 +60,73 @@
 (defun is-cross (adr ofs)
   (if (= (page adr) (page (+ adr ofs))) 0 1))
 
+(defun to-signed (a)
+  (if (< a 128) a (- a 256)))
+
 (defun acc () A)
 (defun absolute ()
-  (progn
-    (setf op-adr (fetch-word))
-    (mem:rd op-adr)))
+  (setf op-adr (fetch-word))
+  (mem:rd op-adr))
 (defun absx ()
-  (progn
-    (setf op-adr (fetch-word))
-    (setf cross (is-cross op-adr X))
-    (setf op-adr (+ X op))
-    (mem:rd op-adr)))
+  (setf op-adr (fetch-word))
+  (setf cross (is-cross op-adr X))
+  (setf op-adr (+ X op))
+  (mem:rd op-adr))
 (defun absy ()
-  (progn
-    (setf op-adr (fetch-word))
-    (setf cross (is-cross op-adr Y))
-    (setf op-adr (+ Y op))
-    (mem:rd op-adr)))
+  (setf op-adr (fetch-word))
+  (setf cross (is-cross op-adr Y))
+  (setf op-adr (+ Y op))
+  (mem:rd op-adr))
 (defun imm () (fetch))
 (defun impl ())
 (defun ind ()
-  (progn
-    (setf op-adr (fetch-word))
-    (mem:rd (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr))))))
+  (setf op-adr (fetch-word))
+  (mem:rd (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr)))))
 (defun xind ()
-  (progn
-    (setf op-adr (+ (fetch) X))
-    (setf op-adr (logand op-adr #xFF))
-    (setf op-adr (make-word (mem:rd op-adr (+ 1 op-adr))))
-    (mem:rd op-adr)))
+  (setf op-adr (+ (fetch) X))
+  (setf op-adr (logand op-adr #xFF))
+  (setf op-adr (make-word (mem:rd op-adr (+ 1 op-adr))))
+  (mem:rd op-adr))
 (defun indy ()
-  (progn
-    (setf op-adr (makeword (fetch) (fetch)))
-    (setf op-adr (make-word (mem:rd op-adr (+ 1 op-adr))))
-    (setf cross (is-cross op-adr Y))
-    (setf op-adr (+ op-adr Y))
-    (mem:rd op-adr)))
+  (setf op-adr (makeword (fetch) (fetch)))
+  (setf op-adr (make-word (mem:rd op-adr (+ 1 op-adr))))
+  (setf cross (is-cross op-adr Y))
+  (setf op-adr (+ op-adr Y))
+  (mem:rd op-adr))
 (defun rel ()
-  (let ((a (fetch)))
-    (if (< a 128) a (- a 256))))
+  (to-signed (fetch)))
 (defun zero ()
-  (progn
-    (setf op-adr (logand (fetch) #xFF))
-    (mem:rd op-adr)))
+  (setf op-adr (logand (fetch) #xFF))
+  (mem:rd op-adr))
 (defun zerox ()
-  (progn
-    (setf op-adr (+ X (logand (fetch) #xFF)))
-    (mem:rd op-adr)))  
+  (setf op-adr (+ X (logand (fetch) #xFF)))
+  (mem:rd op-adr))
 (defun zeroy ()
-  (progn
-    (setf op-adr (+ Y (logand (fetch) #xFF)))
-    (mem:rd op-adr)))
+  (setf op-adr (+ Y (logand (fetch) #xFF)))
+  (mem:rd op-adr))
 
 (defmacro set-zero-neg (v)
   `(progn
-     (when (= ,v 0) (|set-zero|))
-     (when (< ,v 0)
-       (progn
-	 (|set-neg|)
-	 (setf ,v (+ 256 ,v))))))
+     (if (= ,v 0) (|set-zero|) (|clear-zero|))
+     (if (< (to-signed ,v) 0) (|set-neg|) (|clear-neg|))))
 
 (defun sign (v)
   (ash (logand #xFF v) -7))
 
 (defmacro set-carry (v)
-  `(if (= (ash ,v -8) 1)
+  `(if (> (ash ,v -8) 0)
        (progn
 	 (|set-carry|)
-	 (setf ,v (- 256 ,v)))
+	 (setf ,v (logand #xFF ,v)))
        (|clear-carry|)))
 
-(defun ADC (p)
+(defun ADC (adr op)
   (let ((s (sign A)))
-    (progn
-      (setf A (+ A op (|get-carry|)))
-      (set-zero-neg A)
-      (set-carry A)
-      (if (/= (sign A) s) (|set-over|) (|clear-over|))
-      (setf add-cycle cross))))
+    (setf A (+ A op (|get-carry|)))
+    (set-carry A)
+    (set-zero-neg A)
+    (if (/= (sign A) s) (|set-over|) (|clear-over|))
+    (setf add-cycle cross)))
 
 (defstruct instr
   cmd mem cycle)
@@ -155,6 +142,6 @@
 
 (defun one-cmd ()
   (let* ((o (fetch)) (i (svref *table* o)))
-    (progn
-      (funcall (instr-cmd i) (funcall (instr-mem)))
-      (instr-cycle i))))
+    (setf add-cycle 0)
+    (funcall (instr-cmd i) op-adr (funcall (instr-mem i)))
+    (+ (instr-cycle i) add-cycle)))
