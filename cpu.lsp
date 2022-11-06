@@ -1,14 +1,16 @@
-(defvar PC 0)
-(defvar A 0)
-(defvar X 0)
-(defvar Y 0)
-(defvar ST 0)
-(defvar SP 0)
+(defvar PC 0) ;указатель команд
+(defvar A 0) ;аккумулятор
+(defvar X 0) ;индекс 1
+(defvar Y 0) ;индекс 2
+(defvar ST 0) ;состояние
+(defvar SP 0) ;указатель стека
 (defvar op-adr 0); адрес операнда
+(defvar cur-instr 0); текущая запись в таблице
 (defvar cross 0); было ли пересечение страницы
 (defvar add-cycle 0);дополнительные циклы
 
 (defmacro make (name num)
+  "Создание функций для флагов"
   `(progn
      (defun ,(intern (concatenate 'string "get-" name)) ()
        (ash (logand ST (ash 1 ,num)) (- 0 ,num)))
@@ -25,77 +27,92 @@
 (make "neg" 7)
 
 (defun st-push (v)
+  "Запись в стек"
   (mem:wrt (+ #x100 SP) v)
   (decb SP))
 
 (defun st-pop ()
+  "Чтение из стека"
   (incb SP)
   (mem:rd (+ #x100 SP)))
 
 (defmacro incb (v)
+  "Увеличить переменную на 1"
   `(progn
      (incf ,v)
      (when (> ,v 255)
        (setf ,v 0))))
 
 (defmacro decb (v)
+  "Уменьшить переменную на 1"
   `(progn
      (decf ,v)
      (when (< ,v 0)
        (setf ,v 255))))
 
 (defun fetch ()
+  "Загрузить очередной байт по указателю команд"
   (let ((v (mem:rd PC)))
     (incf PC)
     v))
 
 (defun make-word (l h)
+  "Склеить слово из 2 байт"
   (+ l (ash h 8)))
 
 (defun fetch-word ()
+  "Загрузить слово по указателю команд"
   (make-word (fetch) (fetch)))
 
-(defun page (adr) (ash adr -8))
+(defun page (adr) (ash adr -8)) ;Вычислить номер страницы по адресу
 
 (defun is-cross (adr ofs)
+  "Возвращает 1, если пересечение страницы"
   (if (= (page adr) (page (+ adr ofs))) 0 1))
 
 (defun to-signed (a)
+  "Преобразовать к знаковому байту"
   (if (< a 128) a (- a 256)))
 
-(defun acc () A)
+(defun acc () A) ;Режим адресации - аккумулятор
 
 (defun absolute ()
+  "Режим адресации - операнд из памяти, адрес - 2 байта"
   (setf op-adr (fetch-word))
   (mem:rd op-adr))
 
 (defun absx ()
+  "Режим адресации - операнд из памяти, адрес - 2 байта со смещением X"
   (setf op-adr (fetch-word))
   (setf cross (is-cross op-adr X))
   (setf op-adr (+ X op-adr))
   (mem:rd op-adr))
 
 (defun absy ()
+  "Режим адресации - операнд из памяти, адрес - 2 байта со смещением Y"
   (setf op-adr (fetch-word))
   (setf cross (is-cross op-adr Y))
   (setf op-adr (+ Y op-adr))
   (mem:rd op-adr))
 
-(defun imm () (fetch))
+(defun imm () (fetch)); Режим адресации - непосредственный операнд
 
-(defun impl ())
+(defun impl ()); Режим адресации - без операндов
 
 (defun ind ()
+  "Режим адресации - косвенный, адрес 2 байта содержит адрес операнда"
   (setf op-adr (fetch-word))
   (mem:rd (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr)))))
 
 (defun xind ()
+  "Режим адресации - адрес в нулевой странице со смещением X содержит адрес операнда"
   (setf op-adr (+ (fetch) X))
   (setf op-adr (logand op-adr #xFF))
   (setf op-adr (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr))))
   (mem:rd op-adr))
 
 (defun indy ()
+  "Режим адресации - адрес в нулевой странице содержит адрес, операнд находится со смещением Y"
   (setf op-adr (fetch))
   (setf op-adr (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr))))
   (setf cross (is-cross op-adr Y))
@@ -103,29 +120,36 @@
   (mem:rd op-adr))
 
 (defun rel ()
+  "Режим адресации - операнд 1 байт со знаком"
   (to-signed (fetch)))
 
 (defun zero ()
+  "Режим адресации - адрес операнда в нулевой странице"
   (setf op-adr (logand (fetch) #xFF))
   (mem:rd op-adr))
 
 (defun zerox ()
+  "Режим адресации - адрес операнда в нулевой странице со смещением X"
   (setf op-adr (logand #xFF (+ X (fetch))))
   (mem:rd op-adr))
 
 (defun zeroy ()
+  "Режим адресации - адрес операнда в нулевой странице со смещением Y"
   (setf op-adr (+ Y (logand (fetch) #xFF)))
   (mem:rd op-adr))
 
 (defmacro set-zero-neg (v)
+  "Установить флаги нуля и знака"
   `(progn
      (if (= ,v 0) (|set-zero|) (|clear-zero|))
      (if (< (to-signed ,v) 0) (|set-neg|) (|clear-neg|))))
 
 (defun sign (v)
+  "Вычислить знак операнда"
   (ash (logand #xFF v) -7))
 
 (defmacro set-carry (v)
+  "Установить флаг переноса"
   `(if (> (ash ,v -8) 0)
        (progn
 	 (|set-carry|)
@@ -133,9 +157,11 @@
        (|clear-carry|)))
 
 (defun no (adr op)
+  "Пустой код операции"
   (error "NO OP"))
 
 (defun ADC (adr op)
+  "Сложение аккумулятора с операндом и переносом"
   (let ((s (sign A)))
     (setf A (+ A op (|get-carry|)))
     (set-carry A)
@@ -143,14 +169,29 @@
     (if (/= (sign A) s) (|set-over|) (|clear-over|))
     (setf add-cycle cross)))
 
-(defstruct instr
-  cmd mem cycle)
+(defun AND (adr op)
+  "Побитовое И аккумулятора с операндом"
+  (setf A (logand A op))
+  (set-zero-neg A)
+  (setf add-cycle cross))
 
-(defparameter *table*
+(defun ASL (adr op)
+  "Арифметический сдвиг влево операнда"
+  (let ((res (ash op 1)))
+    (set-carry res)
+    (set-zero-neg res)
+    (if (eql (instr-mem cur-instr) #'acc)
+	(setf A res) (mem:wrt adr res))))
+
+(defstruct instr ;Структура элемента таблицы инструкций
+  cmd mem cycle) ;функция команды, функция адресации, число циклов
+
+(defparameter *table* ;Таблица инструкций
   (make-array 256 :initial-element
 	      (make-instr :cmd #'no :mem #'impl :cycle 0)))
 
 (defmacro op (c cmd mem cyc)
+  "Создать инструкцию"
   `(setf (svref *table* ,c)
 	 (make-instr :cmd ,cmd :mem ,mem :cycle ,cyc)))
 
@@ -162,10 +203,20 @@
 (op #x79 #'ADC #'absy 4)
 (op #x61 #'ADC #'xind 6)
 (op #x71 #'ADC #'indy 5)
+(op #x29 #'AND #'imm 2)
+(op #x25 #'AND #'zero 3)
+(op #x35 #'AND #'zerox 4)
+(op #x2D #'AND #'absolute 4)
+(op #x3D #'AND #'absx 4)
+(op #x39 #'AND #'absy 4)
+(op #x21 #'AND #'xind 6)
+(op #x31 #'AND #'indy 5)
 
 (defun one-cmd ()
-  (let* ((o (fetch)) (i (svref *table* o)))
+  "Выполнить одну команду процессора, вернуть число циклов"
+  (let* ((o (fetch)))
+    (setf cur-instr (svref *table* o))
     (setf add-cycle 0)
     (setf cross 0)
-    (funcall (instr-cmd i) op-adr (funcall (instr-mem i)))
-    (+ (instr-cycle i) add-cycle)))
+    (funcall (instr-cmd cur-instr) op-adr (funcall (instr-mem cur-instr)))
+    (+ (instr-cycle cur-instr) add-cycle)))
