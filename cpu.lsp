@@ -64,43 +64,55 @@
   (if (< a 128) a (- a 256)))
 
 (defun acc () A)
+
 (defun absolute ()
   (setf op-adr (fetch-word))
   (mem:rd op-adr))
+
 (defun absx ()
   (setf op-adr (fetch-word))
   (setf cross (is-cross op-adr X))
-  (setf op-adr (+ X op))
+  (setf op-adr (+ X op-adr))
   (mem:rd op-adr))
+
 (defun absy ()
   (setf op-adr (fetch-word))
   (setf cross (is-cross op-adr Y))
-  (setf op-adr (+ Y op))
+  (setf op-adr (+ Y op-adr))
   (mem:rd op-adr))
+
 (defun imm () (fetch))
+
 (defun impl ())
+
 (defun ind ()
   (setf op-adr (fetch-word))
   (mem:rd (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr)))))
+
 (defun xind ()
   (setf op-adr (+ (fetch) X))
   (setf op-adr (logand op-adr #xFF))
-  (setf op-adr (make-word (mem:rd op-adr (+ 1 op-adr))))
+  (setf op-adr (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr))))
   (mem:rd op-adr))
+
 (defun indy ()
-  (setf op-adr (makeword (fetch) (fetch)))
-  (setf op-adr (make-word (mem:rd op-adr (+ 1 op-adr))))
+  (setf op-adr (fetch))
+  (setf op-adr (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr))))
   (setf cross (is-cross op-adr Y))
   (setf op-adr (+ op-adr Y))
   (mem:rd op-adr))
+
 (defun rel ()
   (to-signed (fetch)))
+
 (defun zero ()
   (setf op-adr (logand (fetch) #xFF))
   (mem:rd op-adr))
+
 (defun zerox ()
-  (setf op-adr (+ X (logand (fetch) #xFF)))
+  (setf op-adr (logand #xFF (+ X (fetch))))
   (mem:rd op-adr))
+
 (defun zeroy ()
   (setf op-adr (+ Y (logand (fetch) #xFF)))
   (mem:rd op-adr))
@@ -120,6 +132,9 @@
 	 (setf ,v (logand #xFF ,v)))
        (|clear-carry|)))
 
+(defun no (adr op)
+  (error "NO OP"))
+
 (defun ADC (adr op)
   (let ((s (sign A)))
     (setf A (+ A op (|get-carry|)))
@@ -131,7 +146,9 @@
 (defstruct instr
   cmd mem cycle)
 
-(defparameter *table* (make-array 256))
+(defparameter *table*
+  (make-array 256 :initial-element
+	      (make-instr :cmd #'no :mem #'impl :cycle 0)))
 
 (defmacro op (c cmd mem cyc)
   `(setf (svref *table* ,c)
@@ -139,9 +156,16 @@
 
 (op #x69 #'ADC #'imm 2)
 (op #x65 #'ADC #'zero 3)
+(op #x75 #'ADC #'zerox 4)
+(op #x6D #'ADC #'absolute 4)
+(op #x7D #'ADC #'absx 4)
+(op #x79 #'ADC #'absy 4)
+(op #x61 #'ADC #'xind 6)
+(op #x71 #'ADC #'indy 5)
 
 (defun one-cmd ()
   (let* ((o (fetch)) (i (svref *table* o)))
     (setf add-cycle 0)
+    (setf cross 0)
     (funcall (instr-cmd i) op-adr (funcall (instr-mem i)))
     (+ (instr-cycle i) add-cycle)))
