@@ -183,6 +183,22 @@
     (if (eql (instr-mem cur-instr) #'acc)
 	(setf A res) (mem:wrt adr res))))
 
+(defmacro make-br (fun flag res)
+  "Команды условного перехода"
+  `(defun ,fun (adr op)
+     (when (= (,flag) ,res)
+       (setf add-cycle (+ 1 (is-cross PC op)))
+       (setf PC (+ PC op)))))
+
+(make-br BCC |get-carry| 0) ;Переход если нет переноса
+(make-br BCS |get-carry| 1) ;Переход если перенос
+(make-br BEQ |get-zero| 1) ;Переход если равно
+(make-br BNE |get-zero| 0) ;Переход если не равно
+(make-br BMI |get-neg| 1) ;Переход если меньше
+(make-br BPL |get-neg| 0) ;Переход если больше
+(make-br BVC |get-over| 0) ;Переход если не переполнение
+(make-br BVS |get-over| 1) ;Переход если переполнение
+
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
 
@@ -216,6 +232,12 @@
 (op #x16 #'ASL #'zerox 6)
 (op #x0E #'ASL #'absolute 6)
 (op #x1E #'ASL #'absx 7)
+(op #x90 #'BCC #'rel 2)
+(op #xB0 #'BCS #'rel 2)
+(op #xF0 #'BEQ #'rel 2)
+(op #x30 #'BMI #'rel 2)
+(op #xD0 #'BNE #'rel 2)
+(op #x10 #'BPL #'rel 2)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"

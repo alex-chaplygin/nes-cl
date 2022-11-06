@@ -28,6 +28,10 @@
 (make asl-acc #xA 2 A)
 (make asl-abs #xE 6 (mem:rd #x200) (mem:wrt (+ PC 1) 0)
       (mem:wrt (+ PC 2) 2) (mem:wrt #x200 op))
+(make bcc-no #x90 2 PC (mem:wrt (+ PC 1) op))
+(make bcc-yes #x90 3 PC (mem:wrt (+ PC 1) op))
+(make bcc-cross #x90 4 PC (setf PC #x2FD) (mem:wrt PC #x90)
+      (mem:wrt (+ PC 1) op))
 
 (defun adc-test (func)
   (|clear-carry|)
@@ -54,6 +58,14 @@
   (assert (= (|get-carry|) 0))
   (funcall f 255 255 254)
   (assert (= (|get-carry|) 1)))
+
+(defun bcc-test ()
+  (|set-carry|)
+  (bcc-no 0 10 2)
+  (|clear-carry|)
+  (bcc-yes 0 10 12)
+  (bcc-yes 0 255 1)
+  (bcc-cross 0 1 #x300))
   
 (adc-test #'adc-imm)
 (adc-test #'adc-zero)
@@ -67,3 +79,4 @@
 (adc-test #'adc-indy2)
 (asl-test #'asl-abs)
 (asl-test #'asl-acc)
+(bcc-test)
