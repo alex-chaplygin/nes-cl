@@ -37,14 +37,14 @@
   (mem:rd (+ #x100 SP)))
 
 (defmacro incb (v)
-  "Увеличить переменную на 1"
+  "Увеличить переменную байт на 1"
   `(progn
      (incf ,v)
      (when (> ,v 255)
        (setf ,v 0))))
 
 (defmacro decb (v)
-  "Уменьшить переменную на 1"
+  "Уменьшить переменную байт на 1"
   `(progn
      (decf ,v)
      (when (< ,v 0)
@@ -199,6 +199,12 @@
 (make-br BVC |get-over| 0) ;Переход если не переполнение
 (make-br BVS |get-over| 1) ;Переход если переполнение
 
+(defun BIT* (adr op)
+  "Тест битов"
+  (set-zero-neg (logand A op))
+  (if (= (ash op -7) 1) (|set-neg|) (|clear-neg|))
+  (if (= (logand (ash op -6) 1) 1) (|set-over|) (|clear-over|)))
+
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
 
@@ -238,6 +244,8 @@
 (op #x30 #'BMI #'rel 2)
 (op #xD0 #'BNE #'rel 2)
 (op #x10 #'BPL #'rel 2)
+(op #x24 #'BIT* #'zero 3)
+(op #x2C #'BIT* #'absolute 4)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
