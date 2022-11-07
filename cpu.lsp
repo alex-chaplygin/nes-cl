@@ -26,16 +26,6 @@
 (make "over" 6)
 (make "neg" 7)
 
-(defun st-push (v)
-  "Запись в стек"
-  (mem:wrt (+ #x100 SP) v)
-  (decb SP))
-
-(defun st-pop ()
-  "Чтение из стека"
-  (incb SP)
-  (mem:rd (+ #x100 SP)))
-
 (defmacro incb (v)
   "Увеличить переменную байт на 1"
   `(progn
@@ -49,6 +39,16 @@
      (decf ,v)
      (when (< ,v 0)
        (setf ,v 255))))
+
+(defun st-push (v)
+  "Запись в стек"
+  (mem:wrt (+ #x100 SP) v)
+  (decb SP))
+
+(defun st-pop ()
+  "Чтение из стека"
+  (incb SP)
+  (mem:rd (+ #x100 SP)))
 
 (defun fetch ()
   "Загрузить очередной байт по указателю команд"
@@ -205,6 +205,11 @@
   (if (= (ash op -7) 1) (|set-neg|) (|clear-neg|))
   (if (= (logand (ash op -6) 1) 1) (|set-over|) (|clear-over|)))
 
+(defun BRK (adr op)
+  "Программное прерывание IRQ"
+  (|set-brk|)
+  (interrupt mem:+irq-vector+))
+
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
 
@@ -246,6 +251,7 @@
 (op #x10 #'BPL #'rel 2)
 (op #x24 #'BIT* #'zero 3)
 (op #x2C #'BIT* #'absolute 4)
+(op #x00 #'BRK #'impl 7)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
@@ -256,3 +262,10 @@
     (let ((op (funcall (instr-mem cur-instr))))
       (funcall (instr-cmd cur-instr) op-adr op)
       (+ (instr-cycle cur-instr) add-cycle))))
+
+(defun interrupt (vec)
+  "Вызвать прерывание в процессоре"
+  (st-push (logand PC #xFF))
+  (st-push (ash PC -8))
+  (st-push ST)
+  (setf PC (make-word (mem:rd vec) (mem:rd (+ 1 vec)))))

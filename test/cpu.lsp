@@ -33,6 +33,7 @@
 (make bcc-cross #x90 4 PC (setf PC #x2FD) (mem:wrt PC #x90)
       (mem:wrt (+ PC 1) op))
 (make bit-zero #x24 3 A (mem:wrt (+ PC 1) #x40) (mem:wrt #x40 op))
+(make brk1 #x0 7 PC (mem:write-bank2 (make-array #x4000 :initial-element 3)))
 
 (defun adc-test (func)
   (|clear-carry|)
@@ -78,7 +79,14 @@
   (assert (= (|get-over|) 0))
   (bit-zero 0 #x4F 0)
   (assert (= (|get-over|) 1)))
+
+(defun brk-test ()
+  (setf SP #xFF)
+  (setf ST #x0)
+  (brk1 0 0 #x303)
+  (assert (= (|get-brk|) 1)))
   
+
 (adc-test #'adc-imm)
 (adc-test #'adc-zero)
 (adc-test #'adc-zerox)
@@ -93,3 +101,4 @@
 (asl-test #'asl-acc)
 (bcc-test)
 (bit-test)
+(brk-test)
