@@ -309,6 +309,18 @@
 (op #xC0 #'CPY #'imm 2)
 (op #xC4 #'CPY #'zero 3)
 (op #xCC #'CPY #'absolute 4)
+(op #xC6 #'DEC #'zero 5)
+(op #xD6 #'DEC #'zerox 6)
+(op #xCE #'DEC #'absolute 6)
+(op #xDE #'DEC #'absx 7)
+(op #xCA #'DEX #'impl 2)
+(op #x88 #'DEY #'impl 2)
+(op #xE6 #'INC #'zero 5)
+(op #xF6 #'INC #'zerox 6)
+(op #xEE #'INC #'absolute 6)
+(op #xFE #'INC #'absx 7)
+(op #xE8 #'INX #'impl 2)
+(op #xC8 #'INY #'impl 2)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
