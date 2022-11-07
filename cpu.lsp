@@ -61,6 +61,10 @@
   "Склеить слово из 2 байт"
   (+ l (ash h 8)))
 
+(defun read-word (op-adr)
+  "Прочитать слово из памяти"
+  (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr))))
+
 (defun fetch-word ()
   "Загрузить слово по указателю команд"
   (make-word (fetch) (fetch)))
@@ -103,19 +107,19 @@
 (defun ind ()
   "Режим адресации - косвенный, адрес 2 байта содержит адрес операнда"
   (setf op-adr (fetch-word))
-  (mem:rd (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr)))))
+  (mem:rd (read-word op-adr)))
 
 (defun xind ()
   "Режим адресации - адрес в нулевой странице со смещением X содержит адрес операнда"
   (setf op-adr (+ (fetch) X))
   (setf op-adr (logand op-adr #xFF))
-  (setf op-adr (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr))))
+  (setf op-adr (read-word op-adr))
   (mem:rd op-adr))
 
 (defun indy ()
   "Режим адресации - адрес в нулевой странице содержит адрес, операнд находится со смещением Y"
   (setf op-adr (fetch))
-  (setf op-adr (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr))))
+  (setf op-adr (read-word op-adr))
   (setf cross (is-cross op-adr Y))
   (setf op-adr (+ op-adr Y))
   (mem:rd op-adr))
@@ -358,4 +362,4 @@
   (st-push (logand PC #xFF))
   (st-push (ash PC -8))
   (st-push ST)
-  (setf PC (make-word (mem:rd vec) (mem:rd (+ 1 vec)))))
+  (setf PC (read-word vec)))
