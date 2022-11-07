@@ -231,6 +231,21 @@
 (make-comp CPX X) ;сравнение X с операндом
 (make-comp CPY Y) ;сравнение Y с операндом
 
+(defmacro make-i (name f w &rest body)
+  "Функция для увеличения/уменьшения"
+  `(defun ,name (adr op)
+     (let ((r ,w))
+       (,f r)
+       ,@body
+       (set-zero-neg r))))
+
+(make-i DEC decb op (mem:wrt adr r)) ;уменьшить ячейку памяти
+(make-i DEX decb X (setf X r)) ;уменьшить X
+(make-i DEY decb Y (setf Y r)) ;уменьшить Y
+(make-i INC incb op (mem:wrt adr r)) ;увеличить ячейку памяти
+(make-i INX incb X (setf X r)) ;увеличить X
+(make-i INY incb Y (setf Y r)) ;увеличить Y
+
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
 
