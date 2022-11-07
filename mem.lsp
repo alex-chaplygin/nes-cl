@@ -1,6 +1,6 @@
 (defpackage :mem
   (:use :cl)
-  (:export :rd :wrt :write-bank1 :write-bank2))
+  (:export :rd :wrt :write-bank1 :write-bank2 +nmi-vector+ +irq-vector+ +reset-vector+))
 (in-package :mem)
 (defparameter *table* ())
 (defstruct rec
