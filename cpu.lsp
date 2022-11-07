@@ -170,11 +170,16 @@
     (if (/= (sign A) s) (|set-over|) (|clear-over|))
     (setf add-cycle cross)))
 
-(defun AND* (adr op)
-  "Побитовое И аккумулятора с операндом"
-  (setf A (logand A op))
-  (set-zero-neg A)
-  (setf add-cycle cross))
+(defmacro make-log (name f)
+  "Логические функции"
+  `(defun ,name (adr op)
+     (setf A (,f A op))
+     (set-zero-neg A)
+     (setf add-cycle cross)))
+
+(make-log AND* logand) ;Побитовое И аккумулятора с операндом
+(make-log EOR logxor) ;Исключающее ИЛИ аккумулятора с операндом
+(make-log ORA logior) ;Побитовое ИЛИ аккумулятора с операндом
 
 (defun ASL (adr op)
   "Арифметический сдвиг влево операнда"
@@ -321,6 +326,22 @@
 (op #xFE #'INC #'absx 7)
 (op #xE8 #'INX #'impl 2)
 (op #xC8 #'INY #'impl 2)
+(op #x49 #'EOR #'imm 2)
+(op #x45 #'EOR #'zero 3)
+(op #x55 #'EOR #'zerox 4)
+(op #x4D #'EOR #'absolute 4)
+(op #x5D #'EOR #'absx 4)
+(op #x59 #'EOR #'absy 4)
+(op #x41 #'EOR #'xind 6)
+(op #x51 #'EOR #'indy 5)
+(op #x09 #'ORA #'imm 2)
+(op #x05 #'ORA #'zero 3)
+(op #x15 #'ORA #'zerox 4)
+(op #x0D #'ORA #'absolute 4)
+(op #x1D #'ORA #'absx 4)
+(op #x19 #'ORA #'absy 4)
+(op #x01 #'ORA #'xind 6)
+(op #x11 #'ORA #'indy 5)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
