@@ -22,6 +22,7 @@
 (make "carry" 0)
 (make "zero" 1)
 (make "int" 2)
+(make "dec" 3)
 (make "brk" 4)
 (make "over" 6)
 (make "neg" 7)
@@ -210,6 +211,26 @@
   (|set-brk|)
   (interrupt mem:+irq-vector+))
 
+(defun CLC (adr op) (|clear-carry|)) ;очистка переноса
+(defun CLD (adr op) (|clear-dec|)) ;очистка десятичного режима
+(defun CLI (adr op) (|clear-int|)) ;очистка запрета прерываний
+(defun CLV (adr op) (|clear-over|)) ;очистка переполнения
+(defun SEC (adr op) (|set-carry|)) ;установка переноса
+(defun SED (adr op) (|set-dec|)) ;установка десятичного режима
+(defun SEI (adr op) (|set-int|)) ;установка запрета прерываний
+
+(defmacro make-comp (name reg)
+  "Функция сравнения"
+  `(defun ,name (adr op)
+     (let ((res (- ,reg op)))
+       (if (>= res 0) (|set-carry|) (|clear-carry|))
+       (set-zero-neg res)
+       (setf add-cycle cross))))
+
+(make-comp CMP A) ;сравнение аккумулятора с операндом
+(make-comp CPX X) ;сравнение X с операндом
+(make-comp CPY Y) ;сравнение Y с операндом
+
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
 
@@ -252,6 +273,27 @@
 (op #x24 #'BIT* #'zero 3)
 (op #x2C #'BIT* #'absolute 4)
 (op #x00 #'BRK #'impl 7)
+(op #x18 #'CLC #'impl 2)
+(op #xD8 #'CLD #'impl 2)
+(op #x58 #'CLI #'impl 2)
+(op #xB8 #'CLV #'impl 2)
+(op #x38 #'SEC #'impl 2)
+(op #xF8 #'SED #'impl 2)
+(op #x78 #'SEI #'impl 2)
+(op #xC9 #'CMP #'imm 2)
+(op #xC5 #'CMP #'zero 3)
+(op #xD5 #'CMP #'zerox 4)
+(op #xCD #'CMP #'absolute 4)
+(op #xDD #'CMP #'absx 4)
+(op #xD9 #'CMP #'absy 4)
+(op #xC1 #'CMP #'xind 6)
+(op #xD1 #'CMP #'indy 5)
+(op #xE0 #'CPX #'imm 2)
+(op #xE4 #'CPX #'zero 3)
+(op #xEC #'CPX #'absolute 4)
+(op #xC0 #'CPY #'imm 2)
+(op #xC4 #'CPY #'zero 3)
+(op #xCC #'CPY #'absolute 4)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
