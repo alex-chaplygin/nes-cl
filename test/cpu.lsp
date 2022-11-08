@@ -39,6 +39,9 @@
       (mem:wrt (+ PC 2) (ash op -8)) (mem:wrt op #xAA) (mem:wrt (+ 1 op) #xBB))
 (make jmp-abs #x4C 3 PC (mem:wrt (+ PC 1) (logand #xFF op))
       (mem:wrt (+ PC 2) (ash op -8)))
+(make lsr-acc #x4A 2 A)
+(make lsr-zero #x46 5 (mem:rd #x20) (mem:wrt (+ PC 1) #x20)
+      (mem:wrt #x20 op))
 
 (defun adc-test (func)
   (|clear-carry|)
@@ -102,6 +105,15 @@
   (cmp-imm 10 20 10)
   (assert (= (|get-neg|) 1)))
 
+(defun lsr-test ()
+  (lsr-acc 3 0 1)
+  (assert (= (|get-carry|) 1))
+  (lsr-acc 0 0 0)
+  (assert (= (|get-carry|) 0))
+  (assert (= (|get-zero|) 1))
+  (lsr-zero 0 3 1)
+  (assert (= (|get-carry|) 1)))
+
 (adc-test #'adc-imm)
 (adc-test #'adc-zero)
 (adc-test #'adc-zerox)
@@ -120,3 +132,4 @@
 (cmp-test)
 (jmp-ind 0 #x200 #xBBAA)
 (jmp-abs 0 #x2FF #x2FF)
+(lsr-test)

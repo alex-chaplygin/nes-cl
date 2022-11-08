@@ -51,6 +51,16 @@
   (incb SP)
   (mem:rd (+ #x100 SP)))
 
+(defun st-push-pc ()
+  "Сохранение PC в стек"
+  (st-push (logand PC #xFF))
+  (st-push (ash PC -8)))
+
+(defun st-pop-pc ()
+  "Восстановить указатель команд из стека"
+  (let* ((h (st-pop)) (l (st-pop)))
+    (setf PC (make-word l h))))
+
 (defun fetch ()
   "Загрузить очередной байт по указателю команд"
   (let ((v (mem:rd PC)))
@@ -86,19 +96,15 @@
   (setf op-adr (fetch-word))
   (mem:rd op-adr))
 
-(defun absx ()
-  "Режим адресации - операнд из памяти, адрес - 2 байта со смещением X"
-  (setf op-adr (fetch-word))
-  (setf cross (is-cross op-adr X))
-  (setf op-adr (+ X op-adr))
-  (mem:rd op-adr))
+(defmacro make-abs (name reg)
+  `(defun ,name ()
+     (setf op-adr (fetch-word))
+     (setf cross (is-cross op-adr ,reg))
+     (setf op-adr (+ ,reg op-adr))
+     (mem:rd op-adr)))
 
-(defun absy ()
-  "Режим адресации - операнд из памяти, адрес - 2 байта со смещением Y"
-  (setf op-adr (fetch-word))
-  (setf cross (is-cross op-adr Y))
-  (setf op-adr (+ Y op-adr))
-  (mem:rd op-adr))
+(make-abs absx X) ;Режим адресации - операнд из памяти, адрес - 2 байта со смещением X
+(make-abs absy Y) ;Режим адресации - операнд из памяти, адрес - 2 байта со смещением Y
 
 (defun imm () (fetch)); Режим адресации - непосредственный операнд
 
@@ -185,13 +191,18 @@
 (make-log EOR logxor) ;Исключающее ИЛИ аккумулятора с операндом
 (make-log ORA logior) ;Побитовое ИЛИ аккумулятора с операндом
 
-(defun ASL (adr op)
-  "Арифметический сдвиг влево операнда"
-  (let ((res (ash op 1)))
-    (set-carry res)
-    (set-zero-neg res)
-    (if (eql (instr-mem cur-instr) #'acc)
-	(setf A res) (mem:wrt adr res))))
+(defmacro make-sh (name sh &rest body)
+  "Функции сдвигов"
+  `(defun ,name (adr op)
+     (let ((res (ash op ,sh)))
+       ,@body
+       (set-zero-neg res)
+       (if (eql (instr-mem cur-instr) #'acc)
+	   (setf A res) (mem:wrt adr res)))))
+
+(make-sh ASL 1 (set-carry res)) ;Арифметический сдвиг влево операнда
+(make-sh LSR -1 (if (= (logand op 1) 1)
+		    (|set-carry|) (|clear-carry|))) ;Логический сдвиг вправо
 
 (defmacro make-br (fun flag res)
   "Команды условного перехода"
@@ -256,6 +267,19 @@
 (make-i INY incb Y (setf Y r)) ;увеличить Y
 
 (defun JMP (adr op) (setf PC adr)) ;безусловный переход
+
+(defun JSR (adr op) (st-push-pc) (setf PC adr)) ;вызов подпрограммы
+
+(defmacro make-ld (name reg)
+  "Функции загрузки"
+  `(defun ,name (adr op)
+     (setf ,reg op)
+     (set-zero-neg ,reg)
+     (setf add-cycle cross)))
+
+(make-ld LDA A)	;загрузить аккумулятор
+(make-ld LDX X) ;загрузить X
+(make-ld LDY Y) ;загрузить X
 
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
@@ -350,6 +374,30 @@
 (op #x11 #'ORA #'indy 5)
 (op #x4C #'JMP #'absolute 3)
 (op #x6C #'JMP #'ind 5)
+(op #x20 #'JSR #'absolute 6)
+(op #xA9 #'LDA #'imm 2)
+(op #xA5 #'LDA #'zero 3)
+(op #xB5 #'LDA #'zerox 4)
+(op #xAD #'LDA #'absolute 4)
+(op #xBD #'LDA #'absx 4)
+(op #xB9 #'LDA #'absy 4)
+(op #xA1 #'LDA #'xind 6)
+(op #xB1 #'LDA #'indy 5)
+(op #xA2 #'LDX #'imm 2)
+(op #xA6 #'LDX #'zero 3)
+(op #xB6 #'LDX #'zeroy 4)
+(op #xAE #'LDX #'absolute 4)
+(op #xBE #'LDX #'absy 4)
+(op #xA0 #'LDY #'imm 2)
+(op #xA4 #'LDY #'zero 3)
+(op #xB4 #'LDY #'zerox 4)
+(op #xAC #'LDY #'absolute 4)
+(op #xBC #'LDY #'absx 4)
+(op #x4A #'LSR #'acc 2)
+(op #x46 #'LSR #'zero 5)
+(op #x56 #'LSR #'zerox 6)
+(op #x4E #'LSR #'absolute 6)
+(op #x5E #'LSR #'absx 7)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
@@ -363,7 +411,6 @@
 
 (defun interrupt (vec)
   "Вызвать прерывание в процессоре"
-  (st-push (logand PC #xFF))
-  (st-push (ash PC -8))
+  (st-push-pc)
   (st-push ST)
   (setf PC (read-word vec)))
