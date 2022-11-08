@@ -35,6 +35,10 @@
 (make bit-zero #x24 3 A (mem:wrt (+ PC 1) #x40) (mem:wrt #x40 op))
 (make brk1 #x0 7 PC (mem:write-bank2 (make-array #x4000 :initial-element 3)))
 (make cmp-imm #xC9 2 A (mem:wrt (+ PC 1) op))
+(make jmp-ind #x6C 5 PC (mem:wrt (+ PC 1) (logand #xFF op))
+      (mem:wrt (+ PC 2) (ash op -8)) (mem:wrt op #xAA) (mem:wrt (+ 1 op) #xBB))
+(make jmp-abs #x4C 3 PC (mem:wrt (+ PC 1) (logand #xFF op))
+      (mem:wrt (+ PC 2) (ash op -8)))
 
 (defun adc-test (func)
   (|clear-carry|)
@@ -114,3 +118,5 @@
 (bit-test)
 (brk-test)
 (cmp-test)
+(jmp-ind 0 #x200 #xBBAA)
+(jmp-abs 0 #x2FF #x2FF)

@@ -106,8 +106,8 @@
 
 (defun ind ()
   "Режим адресации - косвенный, адрес 2 байта содержит адрес операнда"
-  (setf op-adr (fetch-word))
-  (mem:rd (read-word op-adr)))
+  (setf op-adr (read-word (fetch-word)))
+  (mem:rd op-adr))
 
 (defun xind ()
   "Режим адресации - адрес в нулевой странице со смещением X содержит адрес операнда"
@@ -255,6 +255,8 @@
 (make-i INX incb X (setf X r)) ;увеличить X
 (make-i INY incb Y (setf Y r)) ;увеличить Y
 
+(defun JMP (adr op) (setf PC adr)) ;безусловный переход
+
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
 
@@ -346,6 +348,8 @@
 (op #x19 #'ORA #'absy 4)
 (op #x01 #'ORA #'xind 6)
 (op #x11 #'ORA #'indy 5)
+(op #x4C #'JMP #'absolute 3)
+(op #x6C #'JMP #'ind 5)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
