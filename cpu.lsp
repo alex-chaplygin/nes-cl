@@ -2,7 +2,7 @@
 (defvar A 0) ;аккумулятор
 (defvar X 0) ;индекс 1
 (defvar Y 0) ;индекс 2
-(defvar ST 0) ;состояние
+(defvar ST #x20) ;состояние
 (defvar SP 0) ;указатель стека
 (defvar op-adr 0); адрес операнда
 (defvar cur-instr 0); текущая запись в таблице
@@ -167,6 +167,11 @@
 	 (setf ,v (logand #xFF ,v)))
        (|clear-carry|)))
 
+(defmacro set-bit1 (var bit)
+  "Установить младший бит"
+  `(setf ,var (if (= ,bit 1) (logior 1 ,var)
+	 (logand #xFFE ,var))))
+
 (defun no (adr op)
   "Пустой код операции"
   (error "NO OP"))
@@ -203,6 +208,8 @@
 (make-sh ASL 1 (set-carry res)) ;Арифметический сдвиг влево операнда
 (make-sh LSR -1 (if (= (logand op 1) 1)
 		    (|set-carry|) (|clear-carry|))) ;Логический сдвиг вправо
+(make-sh ROL 1 (set-bit1 res (|get-carry|))
+	 (set-carry res) (set-zero-neg res))
 
 (defmacro make-br (fun flag res)
   "Команды условного перехода"
@@ -280,6 +287,13 @@
 (make-ld LDA A)	;загрузить аккумулятор
 (make-ld LDX X) ;загрузить X
 (make-ld LDY Y) ;загрузить X
+
+(defun NOP (adr op)) ;Пустая команда
+
+(defun PHA (adr op) (st-push A)) ;Сохранить аккумулятор в стек
+(defun PHP (adr op) (|set-brk|) (st-push ST)) ; Сохранить флаги в стек
+(defun PLA (adr op) (setf A (st-pop)) (set-zero-neg A)) ;Восстановить аккумулятор
+(defun PLP (adr op) (setf ST (st-pop))) ;Восстановить флаги
 
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
@@ -398,6 +412,16 @@
 (op #x56 #'LSR #'zerox 6)
 (op #x4E #'LSR #'absolute 6)
 (op #x5E #'LSR #'absx 7)
+(op #xEA #'NOP #'impl 2)
+(op #x48 #'PHA #'impl 3)
+(op #x08 #'PHP #'impl 3)
+(op #x68 #'PLA #'impl 4)
+(op #x28 #'PLP #'impl 4)
+(op #x2A #'ROL #'acc 2)
+(op #x26 #'ROL #'zero 5)
+(op #x36 #'ROL #'zerox 6)
+(op #x2E #'ROL #'absolute 6)
+(op #x3E #'ROL #'absx 7)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"

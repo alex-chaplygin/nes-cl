@@ -42,6 +42,7 @@
 (make lsr-acc #x4A 2 A)
 (make lsr-zero #x46 5 (mem:rd #x20) (mem:wrt (+ PC 1) #x20)
       (mem:wrt #x20 op))
+(make rol-acc #x2A 2 A)
 
 (defun adc-test (func)
   (|clear-carry|)
@@ -114,6 +115,16 @@
   (lsr-zero 0 3 1)
   (assert (= (|get-carry|) 1)))
 
+(defun rol-test ()
+  (|clear-carry|)
+  (rol-acc 1 0 2)
+  (assert (= (|get-carry|) 0))
+  (|set-carry|)
+  (rol-acc 1 0 3)
+  (assert (= (|get-carry|) 0))
+  (rol-acc #x80 0 0)
+  (assert (= (|get-carry|) 1)))
+
 (adc-test #'adc-imm)
 (adc-test #'adc-zero)
 (adc-test #'adc-zerox)
@@ -133,3 +144,4 @@
 (jmp-ind 0 #x200 #xBBAA)
 (jmp-abs 0 #x2FF #x2FF)
 (lsr-test)
+(rol-test)
