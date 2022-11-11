@@ -1,3 +1,7 @@
+(defpackage :cpu
+  (:use :cl)
+  (:export :one-cmd :interrupt))
+(in-package :cpu)
 (defvar PC 0) ;указатель команд
 (defvar A 0) ;аккумулятор
 (defvar X 0) ;индекс 1
@@ -146,7 +150,7 @@
 
 (defun zeroy ()
   "Режим адресации - адрес операнда в нулевой странице со смещением Y"
-  (setf op-adr (+ Y (logand (fetch) #xFF)))
+  (setf op-adr (logand (+ Y (fetch)) #xFF)))
   (mem:rd op-adr))
 
 (defmacro set-zero-neg (v)
@@ -167,23 +171,27 @@
 	 (setf ,v (logand #xFF ,v)))
        (|clear-carry|)))
 
-(defmacro set-bit1 (var bit)
-  "Установить младший бит"
-  `(setf ,var (if (= ,bit 1) (logior 1 ,var)
-	 (logand #xFFE ,var))))
+(defmacro set-bit (var pos bit)
+  "Установить бит"
+  `(setf ,var (if (= ,bit 1) (logior (ash 1 ,pos) ,var)
+	 (logand (lognot (ash 1 ,pos)) ,var))))
 
 (defun no (adr op)
   "Пустой код операции"
   (error "NO OP"))
 
-(defun ADC (adr op)
-  "Сложение аккумулятора с операндом и переносом"
-  (let ((s (sign A)))
-    (setf A (+ A op (|get-carry|)))
-    (set-carry A)
-    (set-zero-neg A)
-    (if (/= (sign A) s) (|set-over|) (|clear-over|))
-    (setf add-cycle cross)))
+(defmacro make-sum (name f carry)
+  "Функции сложения, вычитания"
+  `(defun ,name (adr op)
+     (let ((s (sign A)))
+       (setf A (,f A op ,carry))
+       (set-carry A)
+       (set-zero-neg A)
+       (if (/= (sign A) s) (|set-over|) (|clear-over|))
+       (setf add-cycle cross))))
+
+(make-sum ADC + (|get-carry|)) ;Сложение аккумулятора с операндом и переносом"
+(make-sum SBC - (- 1 |get-carry|)) ;Сложение аккумулятора с операндом и переносом"
 
 (defmacro make-log (name f)
   "Логические функции"
@@ -208,8 +216,10 @@
 (make-sh ASL 1 (set-carry res)) ;Арифметический сдвиг влево операнда
 (make-sh LSR -1 (if (= (logand op 1) 1)
 		    (|set-carry|) (|clear-carry|))) ;Логический сдвиг вправо
-(make-sh ROL 1 (set-bit1 res (|get-carry|))
+(make-sh ROL 1 (set-bit res 0 (|get-carry|)) ;Циклический сдвиг влево
 	 (set-carry res) (set-zero-neg res))
+(make-sh ROR -1 (set-bit res 7 (|get-carry|)) ;Циклический сдвиг вправо
+	 (if (= (logand op 1) 1) (|set-carry|) (|clear-carry|)))
 
 (defmacro make-br (fun flag res)
   "Команды условного перехода"
@@ -295,6 +305,20 @@
 (defun PLA (adr op) (setf A (st-pop)) (set-zero-neg A)) ;Восстановить аккумулятор
 (defun PLP (adr op) (setf ST (st-pop))) ;Восстановить флаги
 
+(defun RTI (adr op) (PLP adr op) (st-pop-pc)) ;Возврат из прерывания
+(defun RTS (adr op) (st-pop-pc)) ;Возврат из подпрограммы
+
+(defun STA (adr op) (mem:wrt adr A)) ;Сохранение аккумулятора
+(defun STX (adr op) (mem:wrt adr X)) ;Сохранение X
+(defun STY (adr op) (mem:wrt adr Y)) ;Сохранение Y
+
+(defun TAX (adr op) (setf X A) (set-zero-neg X)) ;A -> X
+(defun TAY (adr op) (setf Y A) (set-zero-neg Y)) ;A -> Y
+(defun TSX (adr op) (setf X SP) (set-zero-neg X)) ;SP -> X
+(defun TXA (adr op) (setf A X) (set-zero-neg A)) ;X -> A
+(defun TYA (adr op) (setf A Y) (set-zero-neg A)) ;Y -> A
+(defun TXS (adr op) (setf SP X)) ;X -> SP
+
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
 
@@ -315,6 +339,14 @@
 (op #x79 #'ADC #'absy 4)
 (op #x61 #'ADC #'xind 6)
 (op #x71 #'ADC #'indy 5)
+(op #xE9 #'SBC #'imm 2)
+(op #xE5 #'SBC #'zero 3)
+(op #xF5 #'SBC #'zerox 4)
+(op #xED #'SBC #'absolute 4)
+(op #xFD #'SBC #'absx 4)
+(op #xF9 #'SBC #'absy 4)
+(op #xE1 #'SBC #'xind 6)
+(op #xF1 #'SBC #'indy 5)
 (op #x29 #'AND* #'imm 2)
 (op #x25 #'AND* #'zero 3)
 (op #x35 #'AND* #'zerox 4)
@@ -422,6 +454,32 @@
 (op #x36 #'ROL #'zerox 6)
 (op #x2E #'ROL #'absolute 6)
 (op #x3E #'ROL #'absx 7)
+(op #x6A #'ROR #'acc 2)
+(op #x66 #'ROR #'zero 5)
+(op #x76 #'ROR #'zerox 6)
+(op #x6E #'ROR #'absolute 6)
+(op #x7E #'ROR #'absx 7)
+(op #x40 #'RTI #'impl 6)
+(op #x60 #'RTS #'impl 6)
+(op #x85 #'STA #'zero 3)
+(op #x95 #'STA #'zerox 4)
+(op #x8D #'STA #'absolute 4)
+(op #x9D #'STA #'absx 5)
+(op #x99 #'STA #'absy 5)
+(op #x81 #'STA #'xind 6)
+(op #x91 #'STA #'indy 6)
+(op #x86 #'STX #'zero 3)
+(op #x96 #'STX #'zeroy 4)
+(op #x8E #'STX #'absolute 4)
+(op #x84 #'STY #'zero 3)
+(op #x94 #'STY #'zerox 4)
+(op #x8C #'STY #'absolute 4)
+(op #xAA #'TAX #'impl 2)
+(op #xA8 #'TAY #'impl 2)
+(op #xBA #'TSX #'impl 2)
+(op #x8A #'TXA #'impl 2)
+(op #x9A #'TXS #'impl 2)
+(op #x98 #'TYA #'impl 2)
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
