@@ -4,4 +4,3 @@
 (load "map.lsp")
 (load "mem.lsp")
 (load "cpu.lsp")
-(load "test/cpu.lsp")
