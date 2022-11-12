@@ -1,6 +1,6 @@
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt))
+  (:export :one-cmd :interrupt :add-cycle))
 (in-package :cpu)
 (defvar PC 0) ;указатель команд
 (defvar A 0) ;аккумулятор
