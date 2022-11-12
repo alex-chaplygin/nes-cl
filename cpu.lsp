@@ -150,7 +150,7 @@
 
 (defun zeroy ()
   "Режим адресации - адрес операнда в нулевой странице со смещением Y"
-  (setf op-adr (logand (+ Y (fetch)) #xFF)))
+  (setf op-adr (logand (+ Y (fetch)) #xFF))
   (mem:rd op-adr))
 
 (defmacro set-zero-neg (v)
@@ -246,7 +246,7 @@
 (defun BRK (adr op)
   "Программное прерывание IRQ"
   (|set-brk|)
-  (interrupt mem:+irq-vector+))
+  (interrupt :brk))
 
 (defun CLC (adr op) (|clear-carry|)) ;очистка переноса
 (defun CLD (adr op) (|clear-dec|)) ;очистка десятичного режима
@@ -491,8 +491,16 @@
       (funcall (instr-cmd cur-instr) op-adr op)
       (+ (instr-cycle cur-instr) add-cycle))))
 
-(defun interrupt (vec)
+(setf (get :brk 'vec) mem:+irq-vector+)
+(setf (get :irq 'vec) mem:+irq-vector+)
+(setf (get :nmi 'vec) mem:+nmi-vector+)
+(setf (get :reset 'vec) mem:+reset-vector+)
+
+(defun interrupt (in)
   "Вызвать прерывание в процессоре"
-  (st-push-pc)
-  (st-push ST)
-  (setf PC (read-word vec)))
+  (if (and (eql in :irq) (= (|get-int|) 1)) nil
+      (progn
+	(st-push-pc)
+	(st-push ST)
+	(when (eql in :reset) (setf SP #xFF) (|set-int|))
+	(setf PC (read-word (get in 'vec))))))
