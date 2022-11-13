@@ -1,13 +1,23 @@
-;(defpackage :ppu
-;  (:use :cl)
-;  (:export :rd :wrt :write-chr0 :write-chr1))
+(defpackage :mem
+  (:use :cl)
+  (:export :rd :wrt :write-bank1 :write-bank2 +nmi-vector+ +irq-vector+ +reset-vector+))
+(defpackage :cpu
+  (:use :cl)
+  (:export :one-cmd :interrupt :add-cycle))
+(defpackage :ppu
+  (:use :cl)
+  (:export :rd :wrt :write-chr0 :write-chr1 :get-frame :setup-tiles :*memory*))
 
-;(in-package :ppu)
+(in-package :ppu)
 
-(defconstant +chr0+ #x0000)
-(defconstant +chr1+ #x1000)
-(defconstant +name0+ #x2000)
-(defconstant +palette+ #x3F00)
+(defconstant +chr0+ #x0000) ;адрес таблицы шаблонов 0
+(defconstant +chr1+ #x1000) ;адрес таблицы шаблонов 1
+(defconstant +name0+ #x2000) ;адрес таблицы имен
+(defconstant +palette+ #x3F00) ;адрес палитры
+(defconstant +width+ 256) ;ширина кадра
+(defconstant +height+ 240) ;высота кадра
+(defconstant +width-tiles+ 32) ;ширина кадра в тайлах
+(defconstant +height-tiles+ 30) ;высота кадра в тайлах
 
 (defparameter *memory* (make-array #x4000)) ;память PPU
 (defparameter *oam* (make-array 256)) ;память спрайтов
@@ -19,6 +29,11 @@
 (defparameter *scroll* 0) ;регистр скроллинга
 (defparameter *adr* 0) ;адрес в памяти PPU
 (defparameter *read-buf* 0) ;промежуточный буфер для чтения
+(defparameter *frame* (make-array (* +width+ +height+))) ;буфер кадра
+(defparameter *frame-pos* 0) ;позиция внутри кадра
+(defparameter *fine-x* 0) ;смещение по x внутри тайла
+(defparameter *fine-y* 0) ;смещение по y внутри тайла
+(defparameter *begin-line* 0) ;адрес в таблице имен в начале строки
 
 (defstruct sprite y tile atr x) ;структура спрайта
 
@@ -112,7 +127,7 @@
 (defun oam-dma (page)
   "ДМА передача данных спрайтов"
   (dotimes (i 256)
-    (oam-data-wrt))
+    (oam-data-wrt (mem:rd (+ i (ash page 8)))))
   (setf cpu:add-cycle 514))
 
 (defparameter *regs* (make-hash-table)) ;хеш-таблица регистров
@@ -156,6 +171,84 @@
 (defun vblanc-start ()
   "Начало кадровой развертки"
   (setf *status* (logior *status* #x80)) ;установить бит vblanc
-  (when (= (control-gen-nmi) 1) (cpu:interrupt :nmi))) ;вызвать немаскируемое прерывание
+  (when (= (control-gen-nmi) 1) cpu:interrupt :nmi)) ;прерывание nmi 
 
 (defun vblanc-end () (setf *status* 0)) ;конец кадровой развертки
+
+(defun begin-frame ()
+  "Начало кадра, вычисляем начальный адрес в таблице имен"
+  (let* ((x-scroll (ash *scroll* -8)) ;смещение по X в пискелях
+	 (y-scroll (logand *scroll* #xFF)) ;смещение по Y в пискелях
+	 (coarse-x (ash x-scroll -3)) ;смещение по X в тайлах
+	 (coarse-y (ash y-scroll -3)) ;смещение по Y в тайлах
+	 (fine-y (logand y-scroll 7))) ;смещение по Y внутри тайла
+    (setf *fine-x* (logand x-scroll 7)) ;смещение по X внутри тайла
+    (setf *fine-y* fine-y)
+    (setf *adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10)))
+    (setf *begin-line* *adr*)
+    (setf *frame-pos* 0)))
+
+(defun get-tile ()
+  "Прочитать номер тайла из таблицы имен"
+  (svref *memory* (logior +name0+ (logand *adr* #xFFF))))
+
+(defun get-pattern (tile table fine-y)
+  "Получить адрес тайла из таблицы шаблонов"
+  (+ fine-y (ash tile 4) (ash table 12)))
+
+(defun next-tile ()
+  (setf *fine-x* 0)
+  (incf *adr*))
+
+(defun get-bit (byte num)
+  (logand 1 (ash byte (- num 7))))
+
+(defun get-pixel (tile)
+  "Вычислить значение пикселя из тайла"
+  (let ((blow (svref *memory* tile))
+	(bhigh (svref *memory* (+ tile 8))))
+    (+ (get-bit blow *fine-x*)
+	    (ash (get-bit bhigh *fine-x*) 1))))
+
+(defun get-color (pal back pix)
+  "Получить цвет для палитры, (фона/спрайтов) и пикселя"
+  (svref *memory* (+ +palette+ (ash back 4) (ash pal 2) pix)))
+
+(defun end-of-line ()
+  "Конец строки"
+  (incf *fine-y*)
+  (setf *adr* *begin-line*)
+  (when (= *fine-y* 8)
+    (setf *fine-y* 0)
+    (incf *adr* +width-tiles+)))
+
+(defun scanline ()
+  "Заполнить строку кадра"
+  (dotimes (i +width+)
+    (when (= *fine-x* 8) (next-tile)) ;перемещаемся на следующий тайл
+    (let* ((tile (get-tile))
+	   (tile-adr (get-pattern tile (control-back-pat) *fine-y*)) ;прочитать адрес тайла
+	   (pix (get-pixel tile-adr))
+	   (color (get-color 0 0 pix)))
+      (setf (svref *frame* *frame-pos*) color)
+      (incf *frame-pos*)
+      (incf *fine-x*)))
+  (end-of-line))
+
+(defun get-frame ()
+  "Получить кадр"
+  (begin-frame)
+  (dotimes (i +height+) (scanline))
+  *frame*)
+
+(defun setup-tiles ()
+  (let ((ar #(#x41 #xc2 #x44 #x48 #x10 #x20 #x40 #x80 1 2 4 8 #x16 #x21 #x42 #x87)))
+    (dotimes (i 16)
+      (setf (svref *memory* i) (svref ar i))))
+  (setf (svref *memory* (+ +palette+ 0)) 10)
+  (setf (svref *memory* (+ +palette+ 1)) 56)
+  (setf (svref *memory* (+ +palette+ 2)) 38)
+  (setf (svref *memory* (+ +palette+ 3)) 44)
+  (dotimes (i (* 32 30))
+    (setf (svref *memory* (+ +name0+ i)) (mod i 2)))
+  )
