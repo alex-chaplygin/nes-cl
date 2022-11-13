@@ -6,7 +6,7 @@
   (:export :one-cmd :interrupt :add-cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :rd :wrt :write-chr0 :write-chr1 :get-frame :setup-tiles :*memory*))
+  (:export :rd :wrt :write-chr0 :write-chr1 :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll*))
 
 (in-package :ppu)
 
@@ -24,7 +24,7 @@
 (defparameter *control* 0) ;регистр управления
 (defparameter *mask* 0) ;регистр масок
 (defparameter *status* 0) ;регистр статуса
-(defparameter *byte-num* 0) ;номер байта для адресов
+(defparameter *byte-num* 1) ;номер байта для адресов
 (defparameter *oam-adr* 0) ;адрес в памяти спрайтов
 (defparameter *scroll* 0) ;регистр скроллинга
 (defparameter *adr* 0) ;адрес в памяти PPU
@@ -185,7 +185,6 @@
     (setf *fine-x* (logand x-scroll 7)) ;смещение по X внутри тайла
     (setf *fine-y* fine-y)
     (setf *adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10)))
-    (setf *begin-line* *adr*)
     (setf *frame-pos* 0)))
 
 (defun get-tile ()
@@ -197,8 +196,8 @@
   (+ fine-y (ash tile 4) (ash table 12)))
 
 (defun next-tile ()
-  (setf *fine-x* 0)
-  (incf *adr*))
+  (incf *adr*)
+  (setf *fine-x* 0))
 
 (defun get-bit (byte num)
   (logand 1 (ash byte (- num 7))))
@@ -208,7 +207,7 @@
   (let ((blow (svref *memory* tile))
 	(bhigh (svref *memory* (+ tile 8))))
     (+ (get-bit blow *fine-x*)
-	    (ash (get-bit bhigh *fine-x*) 1))))
+       (ash (get-bit bhigh *fine-x*) 1))))
 
 (defun get-color (pal back pix)
   "Получить цвет для палитры, (фона/спрайтов) и пикселя"
@@ -217,13 +216,13 @@
 (defun end-of-line ()
   "Конец строки"
   (incf *fine-y*)
-  (setf *adr* *begin-line*)
-  (when (= *fine-y* 8)
+  (if (= *fine-y* 8)
     (setf *fine-y* 0)
-    (incf *adr* +width-tiles+)))
+    (setf *adr* (- *adr* +width-tiles+))))
 
 (defun scanline ()
   "Заполнить строку кадра"
+  (setf *begin-line* *adr*)
   (dotimes (i +width+)
     (when (= *fine-x* 8) (next-tile)) ;перемещаемся на следующий тайл
     (let* ((tile (get-tile))
@@ -249,6 +248,7 @@
   (setf (svref *memory* (+ +palette+ 1)) 56)
   (setf (svref *memory* (+ +palette+ 2)) 38)
   (setf (svref *memory* (+ +palette+ 3)) 44)
-  (dotimes (i (* 32 30))
-    (setf (svref *memory* (+ +name0+ i)) (mod i 2)))
+  (dotimes (y 30)
+    (dotimes (x 32)
+      (setf (svref *memory* (+ +name0+ (+ x (* y 32)))) (logand x 1))))
   )

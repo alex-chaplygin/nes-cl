@@ -1,7 +1,6 @@
 (defparameter *screen-width* 256)
 (defparameter *screen-height* 240)
 (defparameter *size* (* *screen-width* *screen-height*))
-(defparameter video-buffer (make-array *size* :initial-element #x1A))
 (cffi:define-foreign-library video
     (t (:default "/tmp/video")))
 (cffi:use-foreign-library video)
