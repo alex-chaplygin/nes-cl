@@ -6,16 +6,6 @@
 (defvar reg #x10)
 (defvar control 0)
 
-(defun wrt (a d)
-  (if (= #x80 (logand #x80 d)) (reset-reg)
-      (if (= 1 (logand reg 1))
-	  (progn
-	    (setf reg (ash reg -1))
-	    (switch a (set5bit (bit1 d))))
-	  (progn
-	    (setf reg (ash reg -1))
-	    (set5bit (bit1 d))))))
-
 (defun bit1 (d) (logand d 1))
 
 (defun set5bit (bit)
@@ -25,6 +15,16 @@
   (progn
     (setf reg #x10)
     (setf control (logior control #xC))))
+
+(defun wrt (a d)
+  (if (= #x80 (logand #x80 d)) (reset-reg)
+      (if (= 1 (logand reg 1))
+	  (progn
+	    (setf reg (ash reg -1))
+	    (switch a (set5bit (bit1 d))))
+	  (progn
+	    (setf reg (ash reg -1))
+	    (set5bit (bit1 d))))))
 
 (defparameter *sw-table* ())
 (defun sw (up func)
