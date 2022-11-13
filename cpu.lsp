@@ -13,6 +13,9 @@
 (defvar cross 0); было ли пересечение страницы
 (defvar add-cycle 0);дополнительные циклы
 
+(defstruct instr ;Структура элемента таблицы инструкций
+  cmd mem cycle) ;функция команды, функция адресации, число циклов
+
 (defmacro make (name num)
   "Создание функций для флагов"
   `(progn
@@ -60,6 +63,10 @@
   (st-push (logand PC #xFF))
   (st-push (ash PC -8)))
 
+(defun make-word (l h)
+  "Склеить слово из 2 байт"
+  (+ l (ash h 8)))
+
 (defun st-pop-pc ()
   "Восстановить указатель команд из стека"
   (let* ((h (st-pop)) (l (st-pop)))
@@ -70,10 +77,6 @@
   (let ((v (mem:rd PC)))
     (incf PC)
     v))
-
-(defun make-word (l h)
-  "Склеить слово из 2 байт"
-  (+ l (ash h 8)))
 
 (defun read-word (op-adr)
   "Прочитать слово из памяти"
@@ -191,7 +194,7 @@
        (setf add-cycle cross))))
 
 (make-sum ADC + (|get-carry|)) ;Сложение аккумулятора с операндом и переносом"
-(make-sum SBC - (- 1 |get-carry|)) ;Сложение аккумулятора с операндом и переносом"
+(make-sum SBC - (- 1 (|get-carry|))) ;Сложение аккумулятора с операндом и переносом"
 
 (defmacro make-log (name f)
   "Логические функции"
@@ -318,9 +321,6 @@
 (defun TXA (adr op) (setf A X) (set-zero-neg A)) ;X -> A
 (defun TYA (adr op) (setf A Y) (set-zero-neg A)) ;Y -> A
 (defun TXS (adr op) (setf SP X)) ;X -> SP
-
-(defstruct instr ;Структура элемента таблицы инструкций
-  cmd mem cycle) ;функция команды, функция адресации, число циклов
 
 (defparameter *table* ;Таблица инструкций
   (make-array 256 :initial-element
