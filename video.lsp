@@ -31,7 +31,7 @@
   (mem:rd #x2002)
   (mem:wrt #x2006 (ash ppu:+palette+ -8))
   (mem:wrt #x2006 (logand ppu:+palette+ #xFF))  
-  (let ((pal #(#xA #x15 #x28 #x31 #x48 #x10 #x20 #x40 #x80 1 2 4 8 #x16 #x21 #x42)))
+  (let ((pal #(#x10 #x12 #x16 #x1A #x2B #x15 #x18 #x1c #x3C #x33 #x27 #x2c #x2 #x35 #x38 #x3e)))
     (dotimes (i 16)
       (mem:wrt #x2007 (svref pal i)))))
 
@@ -41,7 +41,9 @@
   (mem:wrt #x2006 (logand ppu:+name0+ #xFF))  
   (dotimes (y 30)
     (dotimes (x 32)
-      (mem:wrt #x2007 (logand x 1)))))
+      (mem:wrt #x2007 (logand x 1))))
+  (dotimes (i 64)
+    (mem:wrt #x2007 i)))
 
 (defun setup-ppu ()
   (mem:wrt #x2000 #x80)
@@ -57,7 +59,7 @@
 	       (dotimes (i *size*)
 		 (setf (cffi:mem-aref buf :unsigned-char i) (svref fr i)))
 	       (video-update buf)))
-	   (video-sleep 20))
+	   (video-sleep 120))
   (video-close))
 
 (defun close-lib ()
@@ -69,5 +71,6 @@
 (setup-names)
 (setup-ppu)
 (main)
+(ppu:get-frame)
 (video-close)
 (close-lib)
