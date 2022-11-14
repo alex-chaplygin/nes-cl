@@ -16,6 +16,7 @@
 (defconstant +chr0+ #x0000) ;адрес таблицы шаблонов 0
 (defconstant +chr1+ #x1000) ;адрес таблицы шаблонов 1
 (defconstant +name0+ #x2000) ;адрес таблицы имен
+(defconstant +attrib+ #x23C0) ;адрес атрибут
 (defconstant +palette+ #x3F00) ;адрес палитры
 (defconstant +width+ 256) ;ширина кадра
 (defconstant +height+ 240) ;высота кадра
@@ -233,13 +234,13 @@
   "Получить атрибут(номер палитры) текущего тайла"
   (let* ((cor-x (logand #x1F *name-adr*)) ;позиция тайла
 	 (cor-y (logand #x1F (ash *name-adr* -5)))
-	 (adr (logior (logand *name-adr* #xFC0) #x3C0 ;адрес тайла
-		      (ash cor-y -2) (ash cor-x -2)))
+	 (adr (logior +attrib+ (ash (control-name) 10);адрес тайла
+		      (ash cor-y -1) (ash cor-x -2)))
 	 (atr (svref *memory* adr)) ;значение атрибута для квадрата 4x4
-	 (x (logand cor-x 1)) ;координаты квадрата 2x2
-	 (y (logand cor-y 1))
+	 (x (ash (logand cor-x 3) -1)) ;координаты квадрата 2x2
+	 (y (ash (logand cor-y 3) -1))
 	 (pos (+ x (ash y 1)))) ;позиция внутри атрибута
-    ;(format t "cor-x=~X cor-y=~X adr=~X atr=~X x=~X y=~X pos=~X~%" cor-x cor-y adr atr x y pos) 
+    ;(format t "cor-x=~X cor-y=~X adr=~X atr=~X x=~X y=~X pos=~X val=~x~%" cor-x cor-y adr atr x y pos (logand (ash atr (- 0 (ash pos 1))) 3)) 
     (logand (ash atr (- 0 (ash pos 1))) 3)))
 
 (defun end-of-line ()
