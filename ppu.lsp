@@ -6,7 +6,10 @@
   (:export :one-cmd :interrupt :add-cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :rd :wrt :write-chr0 :write-chr1 :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll*))
+  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll*))
+(defpackage :video
+  (:use :cl)
+  (:export :set-palette-mask))
 
 (in-package :ppu)
 
@@ -28,6 +31,7 @@
 (defparameter *oam-adr* 0) ;адрес в памяти спрайтов
 (defparameter *scroll* 0) ;регистр скроллинга
 (defparameter *adr* 0) ;адрес в памяти PPU
+(defparameter *name-adr* 0) ;адрес текущего тайла в таблице имен
 (defparameter *read-buf* 0) ;промежуточный буфер для чтения
 (defparameter *frame* (make-array (* +width+ +height+))) ;буфер кадра
 (defparameter *frame-pos* 0) ;позиция внутри кадра
@@ -64,7 +68,13 @@
 
 (defun control (d) (setf *control* d)) ;записать регистр управления
 
-(defun mask (d) (setf *mask* d)) ;записать регистр маски
+;(defun set-palette-mask (r g b) nil) ;переопределяется в библиотеке
+
+(defun mask (d)
+  "Записать регистр маски"
+  (setf *mask* d))
+;  (video:set-palette-mask (mask-r) (mask-g) (mask-b)))
+
 (defun oam-adr (a) (setf *oam-adr* a)) ;записать адрес памяти спрайтов
 
 (defun status ()
@@ -184,19 +194,19 @@
 	 (fine-y (logand y-scroll 7))) ;смещение по Y внутри тайла
     (setf *fine-x* (logand x-scroll 7)) ;смещение по X внутри тайла
     (setf *fine-y* fine-y)
-    (setf *adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10)))
+    (setf *name-adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10)))
     (setf *frame-pos* 0)))
 
 (defun get-tile ()
   "Прочитать номер тайла из таблицы имен"
-  (svref *memory* (logior +name0+ (logand *adr* #xFFF))))
+  (svref *memory* (logior +name0+ (logand *name-adr* #xFFF))))
 
 (defun get-pattern (tile table fine-y)
   "Получить адрес тайла из таблицы шаблонов"
   (+ fine-y (ash tile 4) (ash table 12)))
 
 (defun next-tile ()
-  (incf *adr*)
+  (incf *name-adr*)
   (setf *fine-x* 0))
 
 (defun get-bit (byte num)
@@ -209,26 +219,45 @@
     (+ (get-bit blow *fine-x*)
        (ash (get-bit bhigh *fine-x*) 1))))
 
+(defun apply-gray (c)
+  "Если черно-белый режим, то применить его к цвету"
+  (if (= (mask-grey) 1) (logand c #x30) c))
+
 (defun get-color (pal back pix)
   "Получить цвет для палитры, (фона/спрайтов) и пикселя"
-  (svref *memory* (+ +palette+ (ash back 4) (ash pal 2) pix)))
+  (apply-gray (if (and (= (mask-show-back) 0) (= (mask-show-sprites) 0))
+		  (svref *memory* +palette+) ;постоянный цвет, когда все выключено
+      (svref *memory* (+ +palette+ (ash back 4) (ash pal 2) pix)))))
+
+(defun get-attrib ()
+  "Получить атрибут(номер палитры) текущего тайла"
+  (let* ((cor-x (logand #x1F *name-adr*)) ;позиция тайла
+	 (cor-y (logand #x1F (ash *name-adr* -5)))
+	 (adr (logior (logand *name-adr* #xFC0) #x3C0 ;адрес тайла
+		      (ash cor-y -2) (ash cor-x -2)))
+	 (atr (svref *memory* adr)) ;значение атрибута для квадрата 4x4
+	 (x (logand cor-x 1)) ;координаты квадрата 2x2
+	 (y (logand cor-y 1))
+	 (pos (+ x (ash y 1)))) ;позиция внутри атрибута
+    ;(format t "cor-x=~X cor-y=~X adr=~X atr=~X x=~X y=~X pos=~X~%" cor-x cor-y adr atr x y pos) 
+    (logand (ash atr (- 0 (ash pos 1))) 3)))
 
 (defun end-of-line ()
   "Конец строки"
   (incf *fine-y*)
   (if (= *fine-y* 8)
     (setf *fine-y* 0)
-    (setf *adr* (- *adr* +width-tiles+))))
+    (setf *name-adr* (- *name-adr* +width-tiles+))))
 
 (defun scanline ()
   "Заполнить строку кадра"
-  (setf *begin-line* *adr*)
+  (setf *begin-line* *name-adr*)
   (dotimes (i +width+)
     (when (= *fine-x* 8) (next-tile)) ;перемещаемся на следующий тайл
     (let* ((tile (get-tile))
 	   (tile-adr (get-pattern tile (control-back-pat) *fine-y*)) ;прочитать адрес тайла
 	   (pix (get-pixel tile-adr))
-	   (color (get-color 0 0 pix)))
+	   (color (get-color (get-attrib) 0 pix)))
       (setf (svref *frame* *frame-pos*) color)
       (incf *frame-pos*)
       (incf *fine-x*)))
@@ -239,16 +268,3 @@
   (begin-frame)
   (dotimes (i +height+) (scanline))
   *frame*)
-
-(defun setup-tiles ()
-  (let ((ar #(#x41 #xc2 #x44 #x48 #x10 #x20 #x40 #x80 1 2 4 8 #x16 #x21 #x42 #x87)))
-    (dotimes (i 16)
-      (setf (svref *memory* i) (svref ar i))))
-  (setf (svref *memory* (+ +palette+ 0)) 10)
-  (setf (svref *memory* (+ +palette+ 1)) 56)
-  (setf (svref *memory* (+ +palette+ 2)) 38)
-  (setf (svref *memory* (+ +palette+ 3)) 44)
-  (dotimes (y 30)
-    (dotimes (x 32)
-      (setf (svref *memory* (+ +name0+ (+ x (* y 32)))) (logand x 1))))
-  )
