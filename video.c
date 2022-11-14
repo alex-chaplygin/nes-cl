@@ -10,8 +10,12 @@ byte *video_buffer;		/**< видео буфер экрана*/
 SDL_Window *window;		/**< окно SDL */
 SDL_Renderer *renderer;		/**< устройство вывода */
 SDL_Surface *screen;		/**< поверхность экрана без курсора мыши */
+byte palette[768]; /**< палитра */
+int r_mask = 1;
+int g_mask = 1;
+int b_mask = 1;
 
-void set_palette(byte *palette);
+void set_palette();
 
 /** 
  * Инициализация графического интерфейса
@@ -35,14 +39,13 @@ void video_init(int scale)
   //  SDL_SetColorKey(cursor_surface, SDL_TRUE, 0);
   screen = SDL_CreateRGBSurface(0, SCREEN_WIDTH, SCREEN_HEIGHT, 8, 0, 0, 0, 0);
   FILE *f = fopen("ntscpalette.pal", "rb");
-  byte pal[192];
   if (!f) {
     printf("No palette file\n");
     //    exit(1);
   }
-  fread(pal, 192, 1, f);
+  fread(palette, 192, 1, f);
   fclose(f);
-  set_palette(pal);
+  set_palette();
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
   SDL_LockSurface(screen);
   video_buffer = screen->pixels;
@@ -71,13 +74,8 @@ int video_get_events()
  */
 void video_update(byte *buf)
 {
-  //byte *b = video_buffer;
   memcpy(video_buffer, buf, SCREEN_WIDTH * SCREEN_HEIGHT);
-  //  for (int y = 0; y < 240; y++)
-  //    for (int x = 0; x < 256; x++)
-  //      *b++ = x / 4;
   SDL_UnlockSurface(screen);
-  //SDL_RenderClear(renderer);
   SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, screen);
   SDL_RenderCopy(renderer, t, NULL, NULL);
   SDL_DestroyTexture(t);
@@ -112,17 +110,25 @@ long video_get_time()
  * 
  * @param palette данные палитры: 3 * 256 = 768 байт
  */
-void set_palette(byte *palette)
+void set_palette()
 {
   SDL_Color colors[256];
   byte *dst = palette;
-  for(int i = 0; i < 64; i++) {
-    colors[i].r = *dst++;
-    colors[i].g = *dst++;
-    colors[i].b = *dst++;
+  for(int i = 0; i < 256; i++) {
+    colors[i].r = *dst++ * r_mask;
+    colors[i].g = *dst++ * g_mask;
+    colors[i].b = *dst++ * b_mask;
   }
   if (SDL_SetPaletteColors(screen->format->palette, colors, 0, 256)) {
     printf("palette error\n");
     exit(1);
   }
+}
+
+void set_palette_mask(int r, int g, int b)
+{
+  r_mask = r;
+  g_mask = g;
+  b_mask = b;
+  set_palette();
 }
