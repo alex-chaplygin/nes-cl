@@ -186,54 +186,46 @@
 
 (defun vblanc-end () (setf *status* 0)) ;конец кадровой развертки
 
-(defun begin-frame ()
-  "Начало кадра, вычисляем начальный адрес в таблице имен"
-  (let* ((x-scroll (ash *scroll* -8)) ;смещение по X в пискелях
-	 (y-scroll (logand *scroll* #xFF)) ;смещение по Y в пискелях
-	 (coarse-x (ash x-scroll -3)) ;смещение по X в тайлах
-	 (coarse-y (ash y-scroll -3)) ;смещение по Y в тайлах
-	 (fine-y (logand y-scroll 7))) ;смещение по Y внутри тайла
-    (setf *fine-x* (logand x-scroll 7)) ;смещение по X внутри тайла
-    (setf *fine-y* fine-y)
-    (setf *name-adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10)))
-    (setf *frame-pos* 0)))
-
-(defun get-tile ()
-  "Прочитать номер тайла из таблицы имен"
-  (svref *memory* (logior +name0+ (logand *name-adr* #xFFF))))
-
-(defun get-pattern (tile table fine-y)
-  "Получить адрес тайла из таблицы шаблонов"
-  (+ fine-y (ash tile 4) (ash table 12)))
-
-(defun next-tile ()
-  "Переход на следующий тайл"
-  (let ((cor-x (logand #x1F *name-adr*)))
-    (if (= cor-x 31)
-	(progn (setf *name-adr* (logxor *name-adr* #x400))
-	       (setf *name-adr* (logand *name-adr* #xFFE0)))
-	(incf *name-adr*))
-    (setf *fine-x* 0)))
-
 (defun get-bit (byte num)
   (logand 1 (ash byte (- num 7))))
 
-(defun get-pixel (tile)
-  "Вычислить значение пикселя из тайла"
-  (let ((blow (svref *memory* tile))
-	(bhigh (svref *memory* (+ tile 8))))
-    (+ (get-bit blow *fine-x*)
-       (ash (get-bit bhigh *fine-x*) 1))))
+(defun rd-mem (adr)
+  "Прочитать значение из памяти с учетом зеркалирования"
+  (svref *memory* (logand adr #x3FFF)))
 
-(defun apply-gray (c)
+(defun get-tile-x () (logand #x1F *name-adr*)) ;получить координату x текущего тайла
+(defun get-tile-y ()
+  (logand #x1F (ash *name-adr* -5))) ;получить координату y текущего тайла
+(defun get-table () (ash *name-adr* -10)) ;получить номер текущего экрана
+(defun scroll-x () (ash *scroll* -8)) ;вычислить позицию перемещения X
+(defun scroll-y () (logand *scroll* #xFF)) ;вычислить позицию перемещения Y
+
+(defun apply-grey (c)
   "Если черно-белый режим, то применить его к цвету"
   (if (= (mask-grey) 1) (logand c #x30) c))
 
 (defun get-color (pal back pix)
   "Получить цвет для палитры, (фона/спрайтов) и пикселя"
-  (apply-gray (if (and (= (mask-show-back) 0) (= (mask-show-sprites) 0))
+  (apply-grey (if (and (= (mask-show-back) 0) (= (mask-show-sprites) 0))
 		  (svref *memory* +palette+) ;постоянный цвет, когда все выключено
       (svref *memory* (+ +palette+ (ash back 4) (ash pal 2) pix)))))
+
+(defun get-pixel (tile-adr)
+  "Вычислить значение пикселя из тайла"
+  (let ((blow (svref *memory* tile-adr))
+	(bhigh (svref *memory* (+ tile-adr 8))))
+    (+ (get-bit blow *fine-x*)
+       (ash (get-bit bhigh *fine-x*) 1))))
+
+(defun get-attrib1 ()
+  "Получить атрибут(номер палитры) текущего тайла"
+  (let* ((adr (logior +attrib+ (ash (get-table) 10);адрес тайла
+		      (ash (get-tile-y) -1) (ash (get-tile-x) -2)))
+	 (atr (rd-mem adr)) ;значение атрибута для квадрата 4x4
+	 (x (ash (logand (get-tile-x) 3) -1)) ;координаты квадрата 2x2
+	 (y (ash (logand (get-tile-y) 3) -1))
+	 (pos (+ x (ash y 1)))) ;позиция внутри атрибута
+    (logand (ash atr (- 0 (ash pos 1))) 3)))
 
 (defun get-attrib ()
   "Получить атрибут(номер палитры) текущего тайла"
@@ -249,39 +241,87 @@
     ;(format t "cor-x=~X cor-y=~X adr=~X atr=~X x=~X y=~X pos=~X val=~x~%" cor-x cor-y adr atr x y pos (logand (ash atr (- 0 (ash pos 1))) 3)) 
     (logand (ash atr (- 0 (ash pos 1))) 3)))
 
-(defun end-of-line ()
-  "Конец строки"
-  (let ((x-scroll (ash *scroll* -8))) ;смещение по X в пискелях
-    (setf *fine-x* (logand x-scroll 7)))
-  (setf *name-adr* *begin-line*)
-  (if (< *fine-y* 7) (incf *fine-y*)
-      (progn
-	(setf *fine-y* 0)
+(defun get-pattern (tile table fine-y)
+  "Получить адрес тайла из таблицы шаблонов"
+  (+ fine-y (ash tile 4) (ash table 12)))
+
+(defun switch-screen ()
+  "Переключиться на экран по горизонтали"
+  (setf *name-adr* (logxor *name-adr* #x400))
+  (setf *name-adr* (logand *name-adr* #xFFE0)))
+
+(defun next-tile ()
+  "Переход на следующий тайл"
+  (if (= (get-tile-x) (- +width-tiles+ 1))
+      (switch-screen)
+      (incf *name-adr*))
+  (setf *fine-x* 0))
+
+(defun back-pixel ()
+  "Вычислить точку фона"
+  (let* ((tile (rd-mem (logior +name0+ *name-adr*))) ;получаем номер тайла
+	 (tile-adr (get-pattern tile (control-back-pat) *fine-y*)) ;прочитать адрес строки тайла
+	 (pix (get-pixel tile-adr))) ;вычисляем пиксель тайла
+    (get-color (get-attrib) 0 pix))) ;вычисляем цвет по атрибуту
+
+(defun render-pixel (pix)
+  "Отрисовать точку"
+  (setf (svref *frame* *frame-pos*) pix))
+
+(defun next-pixel ()
+  "Перейти к следующей точке"
+  (incf *fine-x*)
+  (when (= *fine-x* 8) (next-tile)) ;перемещаемся на следующий тайл
+  (incf *frame-pos*))
+
+(defun sprite-pixel ()
+  "Вычислить точку спрайта"
+  0)
+
+(defun combine (bp sp)
+  "Наложить точки фона и спрайта"
+  bp)
+
+(defun begin-frame ()
+  "Начало кадра, вычисляем начальный адрес в таблице имен"
+  (let* ((coarse-x (ash (scroll-x) -3)) ;смещение по X в тайлах
+	 (coarse-y (ash (scroll-y) -3))) ;смещение по Y в тайлах
+    (setf *fine-x* (logand (scroll-x) 7)) ;смещение по X внутри тайла
+    (setf *fine-y* (logand (scroll-y) 7))
+    (setf *name-adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10))) ;заполняем адрес тайла
+    (setf *begin-line* *name-adr*)
+    (setf *frame-pos* 0)))
+
 ;	(let ((cor-y (logand (ash *name-adr* -5) #x1F)))
 ;	  (if (= cor-y (- +height-tiles+ 1))
 ;	      (setf *name-adr* (logxor (logand *name-adr* #xE1F) #x800))
 ;;	      (if (= cor-y (- +width-tiles+ 1))
 ;		  (setf *name-adr* (logand *name-adr* #xE1F))
 ;		  (setf *name-adr* (
-      (incf *name-adr* +width-tiles+))))
-  ;  (setf *name-adr* (- *name-adr* +width-tiles+))))
 
 (defun scanline ()
   "Заполнить строку кадра"
-  (setf *begin-line* *name-adr*)
   (dotimes (i +width+)
-    (when (= *fine-x* 8) (next-tile)) ;перемещаемся на следующий тайл
-    (let* ((tile (get-tile))
-	   (tile-adr (get-pattern tile (control-back-pat) *fine-y*)) ;прочитать адрес тайла
-	   (pix (get-pixel tile-adr))
-	   (color (get-color (get-attrib) 0 pix)))
-      (setf (svref *frame* *frame-pos*) color)
-      (incf *frame-pos*)
-      (incf *fine-x*)))
-  (end-of-line))
+    (let* ((bp (back-pixel))
+	   (sp (sprite-pixel))
+	   (cp (combine bp sp)))
+      (render-pixel cp)
+      (next-pixel))))
+
+(defun next-line ()
+  "Перейти к следующей строке"
+  (setf *fine-x* (logand (scroll-x) 7))
+  (setf *name-adr* *begin-line*)
+  (if (< *fine-y* 7) (incf *fine-y*)
+      (progn
+	(setf *fine-y* 0)
+	(incf *name-adr* +width-tiles+)))
+  (setf *begin-line* *name-adr*))
 
 (defun get-frame ()
   "Получить кадр"
   (begin-frame)
-  (dotimes (i +height+) (scanline))
+  (dotimes (i +height+)
+    (scanline)
+    (next-line))
   *frame*)
