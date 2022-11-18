@@ -207,8 +207,13 @@
   (+ fine-y (ash tile 4) (ash table 12)))
 
 (defun next-tile ()
-  (incf *name-adr*)
-  (setf *fine-x* 0))
+  "Переход на следующий тайл"
+  (let ((cor-x (logand #x1F *name-adr*)))
+    (if (= cor-x 31)
+	(progn (setf *name-adr* (logxor *name-adr* #x400))
+	       (setf *name-adr* (logand *name-adr* #xFFE0)))
+	(incf *name-adr*))
+    (setf *fine-x* 0)))
 
 (defun get-bit (byte num)
   (logand 1 (ash byte (- num 7))))
@@ -234,7 +239,8 @@
   "Получить атрибут(номер палитры) текущего тайла"
   (let* ((cor-x (logand #x1F *name-adr*)) ;позиция тайла
 	 (cor-y (logand #x1F (ash *name-adr* -5)))
-	 (adr (logior +attrib+ (ash (control-name) 10);адрес тайла
+	 (table (ash *name-adr* -10))
+	 (adr (logior +attrib+ (ash table 10);адрес тайла
 		      (ash cor-y -1) (ash cor-x -2)))
 	 (atr (svref *memory* adr)) ;значение атрибута для квадрата 4x4
 	 (x (ash (logand cor-x 3) -1)) ;координаты квадрата 2x2
@@ -245,10 +251,20 @@
 
 (defun end-of-line ()
   "Конец строки"
-  (incf *fine-y*)
-  (if (= *fine-y* 8)
-    (setf *fine-y* 0)
-    (setf *name-adr* (- *name-adr* +width-tiles+))))
+  (let ((x-scroll (ash *scroll* -8))) ;смещение по X в пискелях
+    (setf *fine-x* (logand x-scroll 7)))
+  (setf *name-adr* *begin-line*)
+  (if (< *fine-y* 7) (incf *fine-y*)
+      (progn
+	(setf *fine-y* 0)
+;	(let ((cor-y (logand (ash *name-adr* -5) #x1F)))
+;	  (if (= cor-y (- +height-tiles+ 1))
+;	      (setf *name-adr* (logxor (logand *name-adr* #xE1F) #x800))
+;;	      (if (= cor-y (- +width-tiles+ 1))
+;		  (setf *name-adr* (logand *name-adr* #xE1F))
+;		  (setf *name-adr* (
+      (incf *name-adr* +width-tiles+))))
+  ;  (setf *name-adr* (- *name-adr* +width-tiles+))))
 
 (defun scanline ()
   "Заполнить строку кадра"
