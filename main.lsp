@@ -4,5 +4,6 @@
 (load "map.lsp")
 (load "mem.lsp")
 (load "cpu.lsp")
+(load "cart.lsp")
 (load "~/quicklisp/setup.lisp")
 (ql:quickload :cffi)
