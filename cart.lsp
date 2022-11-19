@@ -1,6 +1,6 @@
 (defpackage :cart
   (:use :cl)
-  (:export :get-prg :get-chr :read-ines :*mirror*))
+  (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+))
 
 (in-package :cart)
 
@@ -17,7 +17,7 @@
   "Функции получения банков по номеру"
   `(defun ,name (num)
      (if (< num ,count)
-	 (let ((start (ash num ,bits)))
+	 (let ((start (* num ,size)))
 	   (subseq ,arr start (+ start ,size)))
 	 nil)))
 
@@ -59,5 +59,7 @@
 	(when (= tr 1) ) ;прочитать и записать трейнер
 	(setf *prg* (make-array (* *prg-count* +prg-size+)))
 	(setf *chr* (make-array (* *chr-count* +chr-size+)))
+	(map:set-mapper (ash b -4))
+	(dotimes (i 9) (read-byte in))
 	(read-prg in)
 	(read-chr in)))))
