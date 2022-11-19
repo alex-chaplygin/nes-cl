@@ -12,7 +12,7 @@
   (:export :set-palette-mask))
 (defpackage :cart
   (:use :cl)
-  (:export :get-prg :get-chr :read-ines :*mirror*))
+  (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+))
 
 (in-package :ppu)
 
@@ -352,7 +352,7 @@
 		  (x (svref *oam* (+ 3 adr)))
 		  (s (make-sprite :y y :tile tile :atr atr :x x)))
 	     (if (sprite-hit s)
-		 (make-sprite-list (+ pos 1) (+ 1 num) (cons s list))
+		 (make-sprite-list (+ pos 1) (+ 1 num) (append list (list s)))
 		 (make-sprite-list (+ pos 1) num list))))))
 	     
 (defun scanline ()

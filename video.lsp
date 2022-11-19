@@ -72,7 +72,7 @@
 
 (defun setup-ppu ()
   (mem:wrt #x2000 #x80)
-  (mem:wrt #x2001 #xEE))
+  (mem:wrt #x2001 #xFE))
 
 (defun main ()
   (video-init 2)
