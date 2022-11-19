@@ -10,6 +10,9 @@
 (defpackage :video
   (:use :cl)
   (:export :set-palette-mask))
+(defpackage :cart
+  (:use :cl)
+  (:export :get-prg :get-chr :read-ines :*mirror*))
 
 (in-package :ppu)
 
@@ -18,6 +21,7 @@
 (defconstant +name0+ #x2000) ;адрес таблицы имен 0
 (defconstant +name1+ #x2400) ;адрес таблицы имен 1
 (defconstant +name2+ #x2800) ;адрес таблицы имен 2
+(defconstant +name3+ #x2C00) ;адрес таблицы имен 3
 (defconstant +attrib+ #x23C0) ;адрес атрибут
 (defconstant +palette+ #x3F00) ;адрес палитры
 (defconstant +width+ 256) ;ширина кадра
@@ -125,7 +129,7 @@
 
 (defun data-rd ()
   "Чтение данных PPU"
-  (let ((d (svref *memory* *adr*))
+  (let ((d (rd-mem *adr*))
 	(buf *read-buf*))
     (inc-adr)
     (if (< *adr* +palette+)
@@ -171,15 +175,15 @@
 (rd/wr rd () reg-rd)
 (rd/wr wrt (v) reg-wrt)
 
-(defmacro w (name adr)
+(defmacro w (name adr size)
   "Запись шаблонов"
   `(defun ,name (bank)
      (do ((i 0 (+ i 1)))
-	 ((= i (array-dimension bank 0)) 'done)
+	 ((= i ,size) 'done)
        (setf (svref *memory* (+ i ,adr)) (svref bank i)))))
 
-(w write-chr0 +chr0+) ;записать таблицу шаблонов 0
-(w write-chr1 +chr1+) ;записать таблицу шаблонов 1
+(w write-chr0 +chr0+ cart:+chr-size+) ;записать таблицу шаблонов 0
+(w write-chr1 +chr1+ (ash cart:+chr-size+ -1)) ;записать таблицу шаблонов 1
 
 (defun vblanc-start ()
   "Начало кадровой развертки"
@@ -193,19 +197,26 @@
 
 (defun mirror-h (adr)
   "Горизонтальное зеркалирование экранов"
-  (if (or (and (>= adr +name1+) (< adr +name2+))
-	  ())))
+  (if (or (and (>= adr +name1+) (< adr +name2+)) (>= adr +name3+))
+      (- adr #x400) adr))
+
+(defun mirror-v (adr)
+  "Вертикальное зеркалирование"
+  (if (>= adr +name2+) (- adr #x800) adr)) 
+
+(defun mirror-s (adr) (logand adr #xF0FF)) ;один экран
 
 (defun rd-mem (adr)
   "Прочитать значение из памяти с учетом зеркалирования"
-  (let ((m (cart:*mirror*))
-	(a (logand adr #x2FFF)))
-    (ad (cond
-	  ((eql (m :horizontal)) (mirror-h adr))
-	  ((eql (m :vertical)) (mirror-v adr))
-	  ((eql (m :single)) (mirror-s adr))
-	  ((eql (m :4screen)) adr))))
-  (svref *memory* (logand ad #x3FFF))))
+  (let* ((m cart:*mirror*)
+	 (a (logand adr #x2FFF))
+	 (ad (if (>= adr +palette+) adr
+		 (cond
+		   ((eql m :horizontal) (mirror-h a))
+		   ((eql m :vertical) (mirror-v a))
+		   ((eql m :single) (mirror-s a))
+		   ((eql m :4screen) a)))))
+    (svref *memory* (logand ad #x3FFF))))
 
 (defun get-tile-x () (logand #x1F *name-adr*)) ;получить координату x текущего тайла
 (defun get-tile-y ()
@@ -240,7 +251,7 @@
     (+ (get-bit blow *fine-x*)
        (ash (get-bit bhigh *fine-x*) 1))))
 
-(defun get-attrib1 ()
+(defun get-attrib ()
   "Получить атрибут(номер палитры) текущего тайла"
   (let* ((adr (logior +attrib+ (ash (get-table) 10);адрес тайла
 		      (ash (get-tile-y) -1) (ash (get-tile-x) -2)))
@@ -248,20 +259,6 @@
 	 (x (ash (logand (get-tile-x) 3) -1)) ;координаты квадрата 2x2
 	 (y (ash (logand (get-tile-y) 3) -1))
 	 (pos (+ x (ash y 1)))) ;позиция внутри атрибута
-    (logand (ash atr (- 0 (ash pos 1))) 3)))
-
-(defun get-attrib ()
-  "Получить атрибут(номер палитры) текущего тайла"
-  (let* ((cor-x (logand #x1F *name-adr*)) ;позиция тайла
-	 (cor-y (logand #x1F (ash *name-adr* -5)))
-	 (table (ash *name-adr* -10))
-	 (adr (logior +attrib+ (ash table 10);адрес тайла
-		      (ash cor-y -1) (ash cor-x -2)))
-	 (atr (svref *memory* adr)) ;значение атрибута для квадрата 4x4
-	 (x (ash (logand cor-x 3) -1)) ;координаты квадрата 2x2
-	 (y (ash (logand cor-y 3) -1))
-	 (pos (+ x (ash y 1)))) ;позиция внутри атрибута
-    ;(format t "cor-x=~X cor-y=~X adr=~X atr=~X x=~X y=~X pos=~X val=~x~%" cor-x cor-y adr atr x y pos (logand (ash atr (- 0 (ash pos 1))) 3)) 
     (logand (ash atr (- 0 (ash pos 1))) 3)))
 
 (defun get-pattern (tile table fine-y)
