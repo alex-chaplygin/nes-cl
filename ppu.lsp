@@ -6,7 +6,7 @@
   (:export :one-cmd :interrupt :add-cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll*))
+  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam*))
 (defpackage :video
   (:use :cl)
   (:export :set-palette-mask))
@@ -44,7 +44,12 @@
 (defparameter *frame-pos* 0) ;позиция внутри кадра
 (defparameter *fine-x* 0) ;смещение по x внутри тайла
 (defparameter *fine-y* 0) ;смещение по y внутри тайла
+(defparameter *screen-x* 0) ;x текущей точки экрана
+(defparameter *screen-y* 0) ;y текущей точки экрана
 (defparameter *begin-line* 0) ;адрес в таблице имен в начале строки
+(defparameter *sprites-list* nil) ;список спрайтов на строке
+(defparameter *sprite-transp* nil) ;прозрачная ли точка спрайта
+(defparameter *back-transp* nil) ;прозрачная ли точка фона
 
 (defstruct sprite y tile atr x) ;структура спрайта
 
@@ -242,14 +247,14 @@
   "Получить цвет для палитры, (фона/спрайтов) и пикселя"
   (apply-grey (if (and (= (mask-show-back) 0) (= (mask-show-sprites) 0))
 		  (svref *memory* +palette+) ;постоянный цвет, когда все выключено
-      (svref *memory* (+ +palette+ (ash back 4) (ash pal 2) pix)))))
+      (svref *memory* (+ +palette+ (ash back 2) (ash pal 2) pix)))))
 
-(defun get-pixel (tile-adr)
+(defun get-pixel (tile-adr x)
   "Вычислить значение пикселя из тайла"
   (let ((blow (svref *memory* tile-adr))
 	(bhigh (svref *memory* (+ tile-adr 8))))
-    (+ (get-bit blow *fine-x*)
-       (ash (get-bit bhigh *fine-x*) 1))))
+    (+ (get-bit blow x)
+       (ash (get-bit bhigh x) 1))))
 
 (defun get-attrib ()
   "Получить атрибут(номер палитры) текущего тайла"
@@ -278,10 +283,12 @@
 
 (defun back-pixel ()
   "Вычислить точку фона"
-  (let* ((tile (rd-mem (logior +name0+ *name-adr*))) ;получаем номер тайла
-	 (tile-adr (get-pattern tile (control-back-pat) *fine-y*)) ;прочитать адрес строки тайла
-	 (pix (get-pixel tile-adr))) ;вычисляем пиксель тайла
-    (get-color (get-attrib) 0 pix))) ;вычисляем цвет по атрибуту
+  (if (= (mask-show-back) 0) (get-color 0 0 0)
+      (let* ((tile (rd-mem (logior +name0+ *name-adr*))) ;получаем номер тайла
+	     (tile-adr (get-pattern tile (control-back-pat) *fine-y*)) ;прочитать адрес строки тайла
+	     (pix (get-pixel tile-adr *fine-x*))) ;вычисляем пиксель тайла
+	(setf *back-transp* (= pix 0))
+	(get-color (get-attrib) 0 pix)))) ;вычисляем цвет по атрибуту
 
 (defun render-pixel (pix)
   "Отрисовать точку"
@@ -293,13 +300,31 @@
   (when (= *fine-x* 8) (next-tile)) ;перемещаемся на следующий тайл
   (incf *frame-pos*))
 
+(defun sprite-atrib (spr)
+  "Получить атрибут (палитру) спрайта"
+  (+ 4 (logand (sprite-atr spr) 3)))
+
+(defun get-sprite-pixel (a spr)
+  "Получить точку спрайта или nil"
+  (if (not (null a)) a
+      (let ((sp-x (sprite-x spr))) ;левый угол спрайта
+	(if (or (> sp-x *screen-x*)
+		(<= (+ sp-x 8) *screen-x*)) nil ;не пересекается
+	    (let* ((tile-y (- *screen-y* (sprite-y spr)))
+		   (tile-adr (get-pattern (sprite-tile spr) (control-sprite-pat) tile-y))
+		   (pix (get-pixel tile-adr (- *screen-x* sp-x))))
+	      (setf *sprite-transp* (= pix 0))
+	      (get-color (sprite-atrib spr) 1 pix))))))
+
 (defun sprite-pixel ()
   "Вычислить точку спрайта"
-  0)
+  (if (= (mask-show-sprites) 0) nil ;если выключены спрайты выходим
+      (reduce #'get-sprite-pixel *sprites-list* :initial-value nil)))
 
 (defun combine (bp sp)
   "Наложить точки фона и спрайта"
-  bp)
+  (if (null sp) bp
+      (if *sprite-transp* bp sp)))
 
 (defun begin-frame ()
   "Начало кадра, вычисляем начальный адрес в таблице имен"
@@ -311,9 +336,32 @@
     (setf *begin-line* *name-adr*)
     (setf *frame-pos* 0)))
 
+(defun sprite-hit (spr)
+  "Проверка пересекает ли спрайт текущую строчку"
+  (let ((sp-y (sprite-y spr)))  ;верхняя строчка спрайта
+    (and (<= sp-y *screen-y*) (> (+ sp-y 8) *screen-y*))))
+
+(defun make-sprite-list (pos num list)
+  "Добавить спрайт для текущей строки"
+  (cond ((= pos 64) list) ;все просмотрено
+	((= num 9) (setf *status* (logior *status* 2)) (cdr list)) ;переполнение спрайтов
+	(t (let* ((adr (ash pos 2))
+		  (y (svref *oam* adr))
+		  (tile (svref *oam* (+ 1 adr)))
+		  (atr (svref *oam* (+ 2 adr)))
+		  (x (svref *oam* (+ 3 adr)))
+		  (s (make-sprite :y y :tile tile :atr atr :x x)))
+	     (if (sprite-hit s)
+		 (make-sprite-list (+ pos 1) (+ 1 num) (cons s list))
+		 (make-sprite-list (+ pos 1) num list))))))
+	     
 (defun scanline ()
   "Заполнить строку кадра"
+  (setf *sprites-list*
+	(if (= (mask-show-sprites) 1)
+	    (make-sprite-list 0 0 nil) nil)) ;создать список спрайтов на текущей строке
   (dotimes (i +width+)
+    (setf *screen-x* i)
     (let* ((bp (back-pixel))
 	   (sp (sprite-pixel))
 	   (cp (combine bp sp)))
@@ -339,6 +387,7 @@
   "Получить кадр"
   (begin-frame)
   (dotimes (i +height+)
+    (setf *screen-y* i)
     (scanline)
     (next-line))
   *frame*)
