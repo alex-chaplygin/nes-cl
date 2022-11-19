@@ -15,7 +15,9 @@
 
 (defconstant +chr0+ #x0000) ;адрес таблицы шаблонов 0
 (defconstant +chr1+ #x1000) ;адрес таблицы шаблонов 1
-(defconstant +name0+ #x2000) ;адрес таблицы имен
+(defconstant +name0+ #x2000) ;адрес таблицы имен 0
+(defconstant +name1+ #x2400) ;адрес таблицы имен 1
+(defconstant +name2+ #x2800) ;адрес таблицы имен 2
 (defconstant +attrib+ #x23C0) ;адрес атрибут
 (defconstant +palette+ #x3F00) ;адрес палитры
 (defconstant +width+ 256) ;ширина кадра
@@ -189,9 +191,21 @@
 (defun get-bit (byte num)
   (logand 1 (ash byte (- num 7))))
 
+(defun mirror-h (adr)
+  "Горизонтальное зеркалирование экранов"
+  (if (or (and (>= adr +name1+) (< adr +name2+))
+	  ())))
+
 (defun rd-mem (adr)
   "Прочитать значение из памяти с учетом зеркалирования"
-  (svref *memory* (logand adr #x3FFF)))
+  (let ((m (cart:*mirror*))
+	(a (logand adr #x2FFF)))
+    (ad (cond
+	  ((eql (m :horizontal)) (mirror-h adr))
+	  ((eql (m :vertical)) (mirror-v adr))
+	  ((eql (m :single)) (mirror-s adr))
+	  ((eql (m :4screen)) adr))))
+  (svref *memory* (logand ad #x3FFF))))
 
 (defun get-tile-x () (logand #x1F *name-adr*)) ;получить координату x текущего тайла
 (defun get-tile-y ()
@@ -199,6 +213,15 @@
 (defun get-table () (ash *name-adr* -10)) ;получить номер текущего экрана
 (defun scroll-x () (ash *scroll* -8)) ;вычислить позицию перемещения X
 (defun scroll-y () (logand *scroll* #xFF)) ;вычислить позицию перемещения Y
+
+(defun clear-tile-x ()
+  "Перейти на начало строки тайлов"
+  (setf *name-adr* (logand *name-adr* #xFFE0)))
+
+(defun set-tile-y (y)
+  "Установить строку тайлов"
+  (setf *name-adr* (logand *name-adr* #xFC1F))
+  (incf *name-adr* (ash y 5)))
 
 (defun apply-grey (c)
   "Если черно-белый режим, то применить его к цвету"
@@ -245,15 +268,14 @@
   "Получить адрес тайла из таблицы шаблонов"
   (+ fine-y (ash tile 4) (ash table 12)))
 
-(defun switch-screen ()
-  "Переключиться на экран по горизонтали"
-  (setf *name-adr* (logxor *name-adr* #x400))
-  (setf *name-adr* (logand *name-adr* #xFFE0)))
+(defun switch-screen (mask)
+  "Переключиться на экран по горизонтали или вертикали"
+  (setf *name-adr* (logxor *name-adr* mask)))
 
 (defun next-tile ()
   "Переход на следующий тайл"
   (if (= (get-tile-x) (- +width-tiles+ 1))
-      (switch-screen)
+      (progn (switch-screen #x400) (clear-tile-x))
       (incf *name-adr*))
   (setf *fine-x* 0))
 
@@ -292,13 +314,6 @@
     (setf *begin-line* *name-adr*)
     (setf *frame-pos* 0)))
 
-;	(let ((cor-y (logand (ash *name-adr* -5) #x1F)))
-;	  (if (= cor-y (- +height-tiles+ 1))
-;	      (setf *name-adr* (logxor (logand *name-adr* #xE1F) #x800))
-;;	      (if (= cor-y (- +width-tiles+ 1))
-;		  (setf *name-adr* (logand *name-adr* #xE1F))
-;		  (setf *name-adr* (
-
 (defun scanline ()
   "Заполнить строку кадра"
   (dotimes (i +width+)
@@ -315,7 +330,12 @@
   (if (< *fine-y* 7) (incf *fine-y*)
       (progn
 	(setf *fine-y* 0)
-	(incf *name-adr* +width-tiles+)))
+	(let ((y (get-tile-y)))
+	  (cond
+	    ((= y (- +height-tiles+ 1))
+	     (switch-screen #x800) (set-tile-y 0))
+	    ((= y (- +width-tiles+ 1)) (set-tile-y 0))
+	    (t (set-tile-y (+ y 1)))))))
   (setf *begin-line* *name-adr*))
 
 (defun get-frame ()
