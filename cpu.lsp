@@ -1,6 +1,6 @@
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt :add-cycle))
+  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :op-adr))
 (in-package :cpu)
 (defvar PC 0) ;указатель команд
 (defvar A 0) ;аккумулятор
@@ -60,8 +60,8 @@
 
 (defun st-push-pc ()
   "Сохранение PC в стек"
-  (st-push (logand PC #xFF))
-  (st-push (ash PC -8)))
+  (st-push (ash PC -8))
+  (st-push (logand PC #xFF)))
 
 (defun make-word (l h)
   "Склеить слово из 2 байт"
@@ -69,7 +69,7 @@
 
 (defun st-pop-pc ()
   "Восстановить указатель команд из стека"
-  (let* ((h (st-pop)) (l (st-pop)))
+  (let* ((l (st-pop)) (h (st-pop)))
     (setf PC (make-word l h))))
 
 (defun fetch ()
@@ -481,14 +481,20 @@
 (op #x9A #'TXS #'impl 2)
 (op #x98 #'TYA #'impl 2)
 
+(defun fun-name (f) (symbol-name (nth-value 2 (function-lambda-expression f))))
+
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
+  (format t "~X:" PC)
+  (setf a1 (mem:rd (+ PC 1)))
+  (setf a2 (mem:rd (+ PC 2)))
   (let* ((o (fetch)))
     (setf cur-instr (svref *table* o))
     (setf add-cycle 0)
     (setf cross 0)
     (let ((op (funcall (instr-mem cur-instr))))
       (funcall (instr-cmd cur-instr) op-adr op)
+      (format T " ~S ~S ~X ~X adr=~X op=~X A=~X X=~X Y=~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) a1 a2 op-adr op A X Y)
       (+ (instr-cycle cur-instr) add-cycle))))
 
 (setf (get :brk 'vec) mem:+irq-vector+)
