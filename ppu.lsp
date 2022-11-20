@@ -28,9 +28,11 @@
 (defconstant +height+ 240) ;высота кадра
 (defconstant +width-tiles+ 32) ;ширина кадра в тайлах
 (defconstant +height-tiles+ 30) ;высота кадра в тайлах
+(defconstant +max-sprites+ 64) ;маскимальное количество спрайтов в OAM
+(defconstant +sprites-in-line+ 8) ;маскимальное количество спрайтов на строке
 
 (defparameter *memory* (make-array #x4000)) ;память PPU
-(defparameter *oam* (make-array 256)) ;память спрайтов
+(defparameter *oam* (make-array (* 4 +max-sprites+))) ;память спрайтов
 (defparameter *control* 0) ;регистр управления
 (defparameter *mask* 0) ;регистр масок
 (defparameter *status* 0) ;регистр статуса
@@ -50,6 +52,7 @@
 (defparameter *sprites-list* nil) ;список спрайтов на строке
 (defparameter *sprite-transp* nil) ;прозрачная ли точка спрайта
 (defparameter *back-transp* nil) ;прозрачная ли точка фона
+(defparameter *sprite-priority* 0) ;0 - впереди фона, 1 - позади фона
 
 (defstruct sprite y tile atr x) ;структура спрайта
 
@@ -229,6 +232,7 @@
 (defun get-table () (ash *name-adr* -10)) ;получить номер текущего экрана
 (defun scroll-x () (ash *scroll* -8)) ;вычислить позицию перемещения X
 (defun scroll-y () (logand *scroll* #xFF)) ;вычислить позицию перемещения Y
+(defun sprites-height () (if (= (control-sprite-size) 0) 8 16)) ;высота спрайтов
 
 (defun clear-tile-x ()
   "Перейти на начало строки тайлов"
@@ -243,11 +247,11 @@
   "Если черно-белый режим, то применить его к цвету"
   (if (= (mask-grey) 1) (logand c #x30) c))
 
-(defun get-color (pal back pix)
+(defun get-color (pal pix)
   "Получить цвет для палитры, (фона/спрайтов) и пикселя"
   (apply-grey (if (and (= (mask-show-back) 0) (= (mask-show-sprites) 0))
 		  (svref *memory* +palette+) ;постоянный цвет, когда все выключено
-      (svref *memory* (+ +palette+ (ash back 2) (ash pal 2) pix)))))
+      (svref *memory* (+ +palette+ (ash pal 2) pix)))))
 
 (defun get-pixel (tile-adr x)
   "Вычислить значение пикселя из тайла"
@@ -268,7 +272,8 @@
 
 (defun get-pattern (tile table fine-y)
   "Получить адрес тайла из таблицы шаблонов"
-  (+ fine-y (ash tile 4) (ash table 12)))
+  (let ((yy (if (>= fine-y 8) (+ fine-y 8) fine-y)))
+    (+ yy (ash tile 4) (ash table 12))))
 
 (defun switch-screen (mask)
   "Переключиться на экран по горизонтали или вертикали"
@@ -283,12 +288,12 @@
 
 (defun back-pixel ()
   "Вычислить точку фона"
-  (if (= (mask-show-back) 0) (get-color 0 0 0)
+  (if (= (mask-show-back) 0) (get-color 0 0)
       (let* ((tile (rd-mem (logior +name0+ *name-adr*))) ;получаем номер тайла
 	     (tile-adr (get-pattern tile (control-back-pat) *fine-y*)) ;прочитать адрес строки тайла
 	     (pix (get-pixel tile-adr *fine-x*))) ;вычисляем пиксель тайла
 	(setf *back-transp* (= pix 0))
-	(get-color (get-attrib) 0 pix)))) ;вычисляем цвет по атрибуту
+	(get-color (get-attrib) pix)))) ;вычисляем цвет по атрибуту
 
 (defun render-pixel (pix)
   "Отрисовать точку"
@@ -304,17 +309,33 @@
   "Получить атрибут (палитру) спрайта"
   (+ 4 (logand (sprite-atr spr) 3)))
 
+(defun get-sprite-tile (spr)
+  "Получить тайл спрайта"
+  (let ((tile (sprite-tile spr)))
+    (if (= (control-sprite-size) 0) tile (ash tile -1))))
+
+(defun get-sprite-table (spr)
+  "Получить номер таблицы спрайтов"
+  (if (= (control-sprite-size) 0) (control-sprite-pat)
+      (logand (sprite-tile spr) 1)))
+
+(defun get-sprite-pri (spr)
+  "Получить приоритет спрайта"
+  (logand (ash (sprite-atr spr) -5) 1))
+
 (defun get-sprite-pixel (a spr)
   "Получить точку спрайта или nil"
   (if (not (null a)) a
       (let ((sp-x (sprite-x spr))) ;левый угол спрайта
-	(if (or (> sp-x *screen-x*)
-		(<= (+ sp-x 8) *screen-x*)) nil ;не пересекается
+	(if (or (> sp-x *screen-x*) (<= (+ sp-x 8) *screen-x*)) nil ;не пересекается
 	    (let* ((tile-y (- *screen-y* (sprite-y spr)))
-		   (tile-adr (get-pattern (sprite-tile spr) (control-sprite-pat) tile-y))
+		   (tile-adr (get-pattern
+			      (get-sprite-tile spr)
+			      (get-sprite-table spr) tile-y))
 		   (pix (get-pixel tile-adr (- *screen-x* sp-x))))
 	      (setf *sprite-transp* (= pix 0))
-	      (get-color (sprite-atrib spr) 1 pix))))))
+	      (setf *sprite-priority* (get-sprite-pri spr))
+	      (get-color (sprite-atrib spr) pix))))))
 
 (defun sprite-pixel ()
   "Вычислить точку спрайта"
@@ -324,7 +345,9 @@
 (defun combine (bp sp)
   "Наложить точки фона и спрайта"
   (if (null sp) bp
-      (if *sprite-transp* bp sp)))
+      (if (= *sprite-priority* 0) 
+	  (if *sprite-transp* bp sp) ;спрайт впереди фона
+	  (if *back-transp* sp bp)))) ;спрайт позади фона
 
 (defun begin-frame ()
   "Начало кадра, вычисляем начальный адрес в таблице имен"
@@ -339,12 +362,13 @@
 (defun sprite-hit (spr)
   "Проверка пересекает ли спрайт текущую строчку"
   (let ((sp-y (sprite-y spr)))  ;верхняя строчка спрайта
-    (and (<= sp-y *screen-y*) (> (+ sp-y 8) *screen-y*))))
+    (and (<= sp-y *screen-y*)
+	 (> (+ sp-y (sprites-height)) *screen-y*))))
 
 (defun make-sprite-list (pos num list)
   "Добавить спрайт для текущей строки"
-  (cond ((= pos 64) list) ;все просмотрено
-	((= num 9) (setf *status* (logior *status* 2)) (cdr list)) ;переполнение спрайтов
+  (cond ((= pos +max-sprites+) list) ;все просмотрено
+	((= num (+ 1 +sprites-in-line+)) (setf *status* (logior *status* 2)) (cdr list)) ;переполнение спрайтов
 	(t (let* ((adr (ash pos 2))
 		  (y (svref *oam* adr))
 		  (tile (svref *oam* (+ 1 adr)))
