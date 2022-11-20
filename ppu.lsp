@@ -388,7 +388,15 @@
 	     (if (sprite-hit s)
 		 (make-sprite-list (+ pos 1) (+ 1 num) (append list (list s)))
 		 (make-sprite-list (+ pos 1) num list))))))
-	     
+
+(defmacro mk/clip (name f)
+  "Показывать фон/спрайты в левой колонке"
+  `(defun ,name ()
+     (and (= (,f) 0) (< *screen-x* 8))))
+
+(mk/clip clip-sprite-left mask-show-sprite-8)
+(mk/clip clip-back-left mask-show-back-8)
+
 (defun scanline ()
   "Заполнить строку кадра"
   (setf *sprites-list*
@@ -396,8 +404,8 @@
 	    (make-sprite-list 0 0 nil) nil)) ;создать список спрайтов на текущей строке
   (dotimes (i +width+)
     (setf *screen-x* i)
-    (let* ((bp (back-pixel))
-	   (sp (sprite-pixel))
+    (let* ((bp (if (clip-back-left) (get-color 0 0) (back-pixel)))
+	   (sp (if (clip-sprite-left) nil (sprite-pixel)))
 	   (cp (combine bp sp)))
       (render-pixel cp)
       (next-pixel))))
