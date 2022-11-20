@@ -28,6 +28,7 @@
 (defconstant +height+ 240) ;высота кадра
 (defconstant +width-tiles+ 32) ;ширина кадра в тайлах
 (defconstant +height-tiles+ 30) ;высота кадра в тайлах
+(defconstant +tile-size+ 8) ;ширина и высота тайла
 (defconstant +max-sprites+ 64) ;маскимальное количество спрайтов в OAM
 (defconstant +sprites-in-line+ 8) ;маскимальное количество спрайтов на строке
 
@@ -272,7 +273,7 @@
 
 (defun get-pattern (tile table fine-y)
   "Получить адрес тайла из таблицы шаблонов"
-  (let ((yy (if (>= fine-y 8) (+ fine-y 8) fine-y)))
+  (let ((yy (if (>= fine-y +tile-size+) (+ fine-y +tile-size+) fine-y)))
     (+ yy (ash tile 4) (ash table 12))))
 
 (defun switch-screen (mask)
@@ -302,7 +303,7 @@
 (defun next-pixel ()
   "Перейти к следующей точке"
   (incf *fine-x*)
-  (when (= *fine-x* 8) (next-tile)) ;перемещаемся на следующий тайл
+  (when (= *fine-x* +tile-size+) (next-tile)) ;перемещаемся на следующий тайл
   (incf *frame-pos*))
 
 (defun sprite-atrib (spr)
@@ -319,23 +320,32 @@
   (if (= (control-sprite-size) 0) (control-sprite-pat)
       (logand (sprite-tile spr) 1)))
 
-(defun get-sprite-pri (spr)
-  "Получить приоритет спрайта"
-  (logand (ash (sprite-atr spr) -5) 1))
+(defmacro spr/bit (name bit)
+  `(defun ,name (spr) (logand (ash (sprite-atr spr) ,bit) 1)))
+
+(spr/bit get-sprite-pri -5) ;получить приоритет спрайта
+(spr/bit sprite-flip-horiz -6) ;получить отражение спрайта по горизонтали
+(spr/bit sprite-flip-vert -7) ;получить отражение спрайта по вертикали
 
 (defun get-sprite-pixel (a spr)
   "Получить точку спрайта или nil"
-  (if (not (null a)) a
+  (if (not (null a)) a ;эту точку уже занял спрайт с меньшим номером
       (let ((sp-x (sprite-x spr))) ;левый угол спрайта
-	(if (or (> sp-x *screen-x*) (<= (+ sp-x 8) *screen-x*)) nil ;не пересекается
-	    (let* ((tile-y (- *screen-y* (sprite-y spr)))
-		   (tile-adr (get-pattern
-			      (get-sprite-tile spr)
-			      (get-sprite-table spr) tile-y))
-		   (pix (get-pixel tile-adr (- *screen-x* sp-x))))
-	      (setf *sprite-transp* (= pix 0))
-	      (setf *sprite-priority* (get-sprite-pri spr))
-	      (get-color (sprite-atrib spr) pix))))))
+	(if (or (> sp-x *screen-x*)
+		(<= (+ sp-x +tile-size+) *screen-x*)) nil ;не пересекается
+		(let* ((tile-y (if (= (sprite-flip-vert spr) 1) ;отражение по вертикали
+			 (- (- (sprites-height) 2) (- *screen-y* (sprite-y spr)))
+			 (- *screen-y* (sprite-y spr))))
+		       (tile-adr (get-pattern
+				  (get-sprite-tile spr)
+				  (get-sprite-table spr) tile-y))
+		       (tile-x (if (= (sprite-flip-horiz spr) 1) ;отражение по горизонтали
+				   (- (- +tile-size+ 2) (- *screen-x* sp-x))
+				   (- *screen-x* sp-x)))
+		       (pix (get-pixel tile-adr tile-x)))
+		  (setf *sprite-transp* (= pix 0))
+		  (setf *sprite-priority* (get-sprite-pri spr))
+		  (get-color (sprite-atrib spr) pix))))))
 
 (defun sprite-pixel ()
   "Вычислить точку спрайта"
