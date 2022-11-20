@@ -6,7 +6,7 @@
   (:export :one-cmd :interrupt :add-cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam*))
+  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end))
 (defpackage :video
   (:use :cl)
   (:export :set-palette-mask))
@@ -193,8 +193,8 @@
   `(defun ,name (a ,@args)
      (let ((r (gethash a *regs*)))
        (when (null r) (error "PPU invalid address"))
-       (when (null (,f r)) (error "PPU cannot rd/wr from reg"))
-       (funcall (,f r) ,@args))))
+       (if (null (,f r)) 0;(error "PPU cannot rd/wr from reg"))
+       (funcall (,f r) ,@args)))))
 
 (rd/wr rd () reg-rd)
 (rd/wr wrt (v) reg-wrt)
@@ -212,7 +212,7 @@
 (defun vblanc-start ()
   "Начало кадровой развертки"
   (set-vblank) ;установить бит vblanc
-  (when (= (control-gen-nmi) 1) cpu:interrupt :nmi)) ;прерывание nmi 
+  (when (= (control-gen-nmi) 1) (cpu:interrupt :nmi))) ;прерывание nmi 
 
 (defun vblanc-end () (clear-vblank)) ;конец кадровой развертки
 
