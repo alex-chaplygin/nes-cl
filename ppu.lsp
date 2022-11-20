@@ -54,8 +54,9 @@
 (defparameter *sprite-transp* nil) ;прозрачная ли точка спрайта
 (defparameter *back-transp* nil) ;прозрачная ли точка фона
 (defparameter *sprite-priority* 0) ;0 - впереди фона, 1 - позади фона
+(defparameter *sprite-num* 0) ;номер текущего спрайта
 
-(defstruct sprite y tile atr x) ;структура спрайта
+(defstruct sprite y tile atr x num) ;структура спрайта
 
 (defmacro mk (pre name num mask reg)
   "Создание функций для регистров"
@@ -82,6 +83,20 @@
 (mk/mas g 6 1) ;показывать зеленый цвет
 (mk/mas b 7 1) ;показывать синий цвет
 
+(defmacro mk/status (name bit)
+  "Функции установки и сброса для регистра статуса"
+  `(progn
+     (defun ,(intern (concatenate 'string (symbol-name 'set-)
+				(symbol-name name))) ()
+       (setf *status* (logior *status* (ash 1 ,bit))))
+     (defun ,(intern (concatenate 'string (symbol-name 'clear-)
+				(symbol-name name))) ()
+       (setf *status* (logand *status* (lognot (ash 1 ,bit)))))))
+
+(mk/status over 5) ;флаг переплонения спрайтов
+(mk/status sprite0-hit 6) ;флаг пересечения спрайта 0
+(mk/status vblank 7) ;флаг режима кадровой развертки
+
 (defun control (d) (setf *control* d)) ;записать регистр управления
 
 ;(defun set-palette-mask (r g b) nil) ;переопределяется в библиотеке
@@ -97,7 +112,7 @@
   "Прочитать регистр статуса"
   (let ((s *status*))
     (setf *byte-num* 1) ;сброс номера байта для адресов
-    (setf *status* (logand s #x7F)) ;очистить флаг vblanc
+    (clear-vblank) ;очистить флаг vblanc
     s))
 
 (defun status-vblanc ()
@@ -196,10 +211,10 @@
 
 (defun vblanc-start ()
   "Начало кадровой развертки"
-  (setf *status* (logior *status* #x80)) ;установить бит vblanc
+  (set-vblank) ;установить бит vblanc
   (when (= (control-gen-nmi) 1) cpu:interrupt :nmi)) ;прерывание nmi 
 
-(defun vblanc-end () (setf *status* 0)) ;конец кадровой развертки
+(defun vblanc-end () (clear-vblank)) ;конец кадровой развертки
 
 (defun get-bit (byte num)
   (logand 1 (ash byte (- num 7))))
@@ -228,8 +243,7 @@
     (svref *memory* (logand ad #x3FFF))))
 
 (defun get-tile-x () (logand #x1F *name-adr*)) ;получить координату x текущего тайла
-(defun get-tile-y ()
-  (logand #x1F (ash *name-adr* -5))) ;получить координату y текущего тайла
+(defun get-tile-y () (logand #x1F (ash *name-adr* -5))) ;получить координату y текущего тайла
 (defun get-table () (ash *name-adr* -10)) ;получить номер текущего экрана
 (defun scroll-x () (ash *scroll* -8)) ;вычислить позицию перемещения X
 (defun scroll-y () (logand *scroll* #xFF)) ;вычислить позицию перемещения Y
@@ -293,7 +307,7 @@
       (let* ((tile (rd-mem (logior +name0+ *name-adr*))) ;получаем номер тайла
 	     (tile-adr (get-pattern tile (control-back-pat) *fine-y*)) ;прочитать адрес строки тайла
 	     (pix (get-pixel tile-adr *fine-x*))) ;вычисляем пиксель тайла
-	(setf *back-transp* (= pix 0))
+	(setf *back-transp* (= pix 0)) ;вычисляем прозрачность точки
 	(get-color (get-attrib) pix)))) ;вычисляем цвет по атрибуту
 
 (defun render-pixel (pix)
@@ -345,6 +359,7 @@
 		       (pix (get-pixel tile-adr tile-x)))
 		  (setf *sprite-transp* (= pix 0))
 		  (setf *sprite-priority* (get-sprite-pri spr))
+		  (setf *sprite-num* (sprite-num spr))
 		  (get-color (sprite-atrib spr) pix))))))
 
 (defun sprite-pixel ()
@@ -352,12 +367,19 @@
   (if (= (mask-show-sprites) 0) nil ;если выключены спрайты выходим
       (reduce #'get-sprite-pixel *sprites-list* :initial-value nil)))
 
+(defun set-zero-hit ()
+  "Вычислить пересечение спрайта 0 с фоном"
+  (when (and (= *sprite-num* 0) (not *back-transp*)
+	     (not *sprite-transp*) (= (mask-show-back) 1))
+    (set-sprite0-hit)))
+
 (defun combine (bp sp)
   "Наложить точки фона и спрайта"
   (if (null sp) bp
-      (if (= *sprite-priority* 0) 
-	  (if *sprite-transp* bp sp) ;спрайт впереди фона
-	  (if *back-transp* sp bp)))) ;спрайт позади фона
+      (progn (set-zero-hit)
+	     (if (= *sprite-priority* 0) 
+		 (if *sprite-transp* bp sp) ;спрайт впереди фона
+		 (if *back-transp* sp bp))))) ;спрайт позади фона
 
 (defun begin-frame ()
   "Начало кадра, вычисляем начальный адрес в таблице имен"
@@ -367,6 +389,7 @@
     (setf *fine-y* (logand (scroll-y) 7))
     (setf *name-adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10))) ;заполняем адрес тайла
     (setf *begin-line* *name-adr*)
+    (setf *status* 0)
     (setf *frame-pos* 0)))
 
 (defun sprite-hit (spr)
@@ -378,13 +401,13 @@
 (defun make-sprite-list (pos num list)
   "Добавить спрайт для текущей строки"
   (cond ((= pos +max-sprites+) list) ;все просмотрено
-	((= num (+ 1 +sprites-in-line+)) (setf *status* (logior *status* 2)) (cdr list)) ;переполнение спрайтов
+	((= num (+ 1 +sprites-in-line+)) (set-over) (cdr list)) ;переполнение спрайтов
 	(t (let* ((adr (ash pos 2))
 		  (y (svref *oam* adr))
 		  (tile (svref *oam* (+ 1 adr)))
 		  (atr (svref *oam* (+ 2 adr)))
 		  (x (svref *oam* (+ 3 adr)))
-		  (s (make-sprite :y y :tile tile :atr atr :x x)))
+		  (s (make-sprite :y y :tile tile :atr atr :x x :num pos)))
 	     (if (sprite-hit s)
 		 (make-sprite-list (+ pos 1) (+ 1 num) (append list (list s)))
 		 (make-sprite-list (+ pos 1) num list))))))
