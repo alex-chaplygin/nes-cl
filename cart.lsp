@@ -1,6 +1,6 @@
 (defpackage :cart
   (:use :cl)
-  (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+))
+  (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+ :*prg-count* :*chr-count*))
 
 (in-package :cart)
 
