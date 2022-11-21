@@ -6,7 +6,7 @@
 (defvar A 0) ;аккумулятор
 (defvar X 0) ;индекс 1
 (defvar Y 0) ;индекс 2
-(defvar ST #x20) ;состояние
+(defvar ST #x24) ;состояние
 (defvar SP 0) ;указатель стека
 (defvar op-adr 0); адрес операнда
 (defvar cur-instr 0); текущая запись в таблице
@@ -72,6 +72,7 @@
   (let* ((l (st-pop)) (h (st-pop)))
     (setf PC (make-word l h))))
 
+(declaim (inline fetch))
 (defun fetch ()
   "Загрузить очередной байт по указателю команд"
   (let ((v (mem:rd PC)))
@@ -306,7 +307,7 @@
 (defun PHA (adr op) (st-push A)) ;Сохранить аккумулятор в стек
 (defun PHP (adr op) (|set-brk|) (st-push ST)) ; Сохранить флаги в стек
 (defun PLA (adr op) (setf A (st-pop)) (set-zero-neg A)) ;Восстановить аккумулятор
-(defun PLP (adr op) (setf ST (st-pop))) ;Восстановить флаги
+(defun PLP (adr op) (setf ST (+ #x20 (st-pop)))) ;Восстановить флаги
 
 (defun RTI (adr op) (PLP adr op) (st-pop-pc)) ;Возврат из прерывания
 (defun RTS (adr op) (st-pop-pc)) ;Возврат из подпрограммы
@@ -366,6 +367,8 @@
 (op #x30 #'BMI #'rel 2)
 (op #xD0 #'BNE #'rel 2)
 (op #x10 #'BPL #'rel 2)
+(op #x70 #'BVS #'rel 2)
+(op #x50 #'BVC #'rel 2)
 (op #x24 #'BIT* #'zero 3)
 (op #x2C #'BIT* #'absolute 4)
 (op #x00 #'BRK #'impl 7)
@@ -494,7 +497,7 @@
     (setf cross 0)
     (let ((op (funcall (instr-mem cur-instr))))
       (funcall (instr-cmd cur-instr) op-adr op)
-      (format T " ~S ~S ~X ~X adr=~X op=~X A=~X X=~X Y=~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) a1 a2 op-adr op A X Y)
+      (format T " ~S ~S ~X ~X adr=~X op=~X A=~X X=~X Y=~X ST=~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) a1 a2 op-adr op A X Y ST)
       (+ (instr-cycle cur-instr) add-cycle))))
 
 (setf (get :brk 'vec) mem:+irq-vector+)
