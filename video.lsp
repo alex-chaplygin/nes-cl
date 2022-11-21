@@ -2,11 +2,11 @@
 (defparameter *screen-height* 240)
 (defparameter *size* (* *screen-width* *screen-height*))
 
-(defpackage :video
-  (:use :cl)
-  (:export :set-palette-mask))
+;(defpackage :video
+;  (:use :cl)
+;  (:export :set-palette-mask :start))
 
-(in-package :video)
+;(in-package :video)
 
 (defun init-lib ()
   (cffi:define-foreign-library video
@@ -76,13 +76,14 @@
 
 (defun main ()
   (video-init 2)
-  (cart:read-ines "test/mario.nes")
+  (cart:read-ines "test/nestest.nes")
   (mem:write-bank1 (cart:get-prg 0))
   (mem:write-bank2 (cart:get-prg (- cart:*prg-count* 1)))
   (ppu:write-chr0 (cart:get-chr 0))
   (setf q 1)
   (setf cycles 7)
-  (cpu:interrupt :reset)
+					;  (cpu:interrupt :reset)
+  (setf cpu:PC #xC000)
   (loop while (= q 1)
 	do (setf q (video-get-events))
 	   (loop while (< cycles 29780) do 
@@ -101,16 +102,31 @@
 	   (video-sleep 20))
   (video-close))
 
+(defun main2 ()
+  (video-init 2)
+  (setf q 1)
+  (setf cycles 7)
+  (loop while (= q 1) do
+    (setf q (video-get-events))
+    (let ((fr (ppu:get-frame)))
+      (cffi:with-foreign-object (buf :unsigned-char (* 256 240))
+	(dotimes (i *size*)
+	  (setf (cffi:mem-aref buf :unsigned-char i) (svref fr i)))
+	(video-update buf)))
+    (video-sleep 20))
+  (video-close))
+
 (defun close-lib ()
   (cffi:close-foreign-library 'video))
 
 (init-lib)
-(setup-tiles)
-(setup-palette)
-(setup-names)
-(setup-sprites)
-(setup-ppu)
+;  (setup-tiles)
+;  (setup-palette)
+;  (setup-names)
+;  (setup-sprites)
+;  (setup-ppu)
 (main)
-(ppu:get-frame)
+;(main2)
+;(ppu:get-frame)
 (video-close)
 (close-lib)
