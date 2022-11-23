@@ -7,7 +7,7 @@
   upper
   read
   write)
-(defparameter *memory* (make-array #x10000))
+(defparameter *memory* (make-array #x10000 :element-type :unsigned-byte))
 
 (defun mem (upper read write)
   "Запись в таблицу регионов памяти"
@@ -43,12 +43,13 @@
 
 (defmacro m (name func par)
   `(defun ,name (,@par)
-    (defun f (rec tail)
-      (if (< adr (rec-upper rec))
-	  (funcall (,func rec) ,@par)
-	  (if (null tail)
-	      (error ",name неверный адрес")
-	      (f (car tail) (cdr tail)))))
+     (defun f (rec tail)
+       (let ((adr (logand adr #xFFFF)))
+	 (if (< adr (rec-upper rec))
+	     (funcall (,func rec) ,@par)
+	     (if (null tail)
+		 (error ",name неверный адрес")
+		 (f (car tail) (cdr tail))))))
     (f (car *table*) (cdr *table*))))
   
 (m rd rec-read (adr))
