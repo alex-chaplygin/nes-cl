@@ -1,6 +1,6 @@
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP))
+  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y))
 (in-package :cpu)
 (defvar PC 0) ;указатель команд
 (defvar A 0) ;аккумулятор
@@ -81,7 +81,9 @@
 
 (defun read-word (op-adr)
   "Прочитать слово из памяти"
-  (make-word (mem:rd op-adr) (mem:rd (+ 1 op-adr))))
+  (let* ((l (mem:rd op-adr))
+	 (h (if (= (logand op-adr #xFF) #xFF) (mem:rd 0) (mem:rd (+ 1 op-adr)))))
+    (make-word l h)))
 
 (defun fetch-word ()
   "Загрузить слово по указателю команд"
@@ -184,19 +186,20 @@
   "Пустой код операции"
   (error "NO OP"))
 
-(defmacro make-sum (name f carry)
+(defmacro make-sum (name f carry &rest body)
   "Функции сложения, вычитания"
   `(defun ,name (adr op)
      (let ((b A))
        (setf A (,f A op ,carry))
        (if (> (logand (logxor b A) (logxor op A) #x80) 0)
 	   (|set-over|) (|clear-over|))
+       (when (< A 0) (incf A 256))
        (set-carry A)
        (set-zero-neg A)
-       (setf add-cycle cross))))
+       (setf add-cycle cross) ,@body)))
 
 (make-sum ADC + (|get-carry|)) ;Сложение аккумулятора с операндом и переносом"
-(make-sum SBC - (- 1 (|get-carry|))) ;Сложение аккумулятора с операндом и переносом"
+(make-sum SBC - (- 1 (|get-carry|)) (logxor ST 1)) ;Вычитание с заемом"
 
 (defmacro make-log (name f)
   "Логические функции"
@@ -308,7 +311,7 @@
 (defun PHA (adr op) (st-push A)) ;Сохранить аккумулятор в стек
 (defun PHP (adr op) (|set-brk|) (st-push ST)) ; Сохранить флаги в стек
 (defun PLA (adr op) (setf A (st-pop)) (set-zero-neg A)) ;Восстановить аккумулятор
-(defun PLP (adr op) (setf ST (logior #x20 (st-pop)))) ;Восстановить флаги
+(defun PLP (adr op) (setf ST (st-pop))) ;Восстановить флаги
 
 (defun RTI (adr op) (PLP adr op) (st-pop-pc)) ;Возврат из прерывания
 (defun RTS (adr op) (st-pop-pc) (incf PC)) ;Возврат из подпрограммы
@@ -489,7 +492,7 @@
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
- ; (format t "~X:" PC)
+  (format t "~X:" PC)
   (setf a1 (mem:rd (+ PC 1)))
   (setf a2 (mem:rd (+ PC 2)))
   (let* ((o (fetch)))
@@ -498,7 +501,7 @@
     (setf cross 0)
     (let ((op (funcall (instr-mem cur-instr))))
       (funcall (instr-cmd cur-instr) op-adr op)
-;      (format T " ~S ~S ~X ~X adr=~X op=~X A=~X X=~X Y=~X ST=~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) a1 a2 op-adr op A X Y ST)
+     (format T " ~S ~S ~X ~X    A:~X X:~X Y:~X ST:~X SP:~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) op-adr op A X Y ST SP)
       (+ (instr-cycle cur-instr) add-cycle))))
 
 (setf (get :brk 'vec) mem:+irq-vector+)
@@ -512,5 +515,5 @@
       (progn
 	(st-push-pc)
 	(st-push ST)
-	(when (eql in :reset) (setf SP #xFF) (|set-int|))
+	(when (eql in :reset) (setf SP #xFD) (|set-int|))
 	(setf PC (read-word (get in 'vec))))))
