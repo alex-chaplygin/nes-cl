@@ -7,3 +7,4 @@
 (load "cart.lsp")
 (load "~/quicklisp/setup.lisp")
 (ql:quickload :cffi)
+(load "video.lsp")
