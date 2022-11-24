@@ -32,8 +32,8 @@
 (defconstant +max-sprites+ 64) ;маскимальное количество спрайтов в OAM
 (defconstant +sprites-in-line+ 8) ;маскимальное количество спрайтов на строке
 
-(defparameter *memory* (make-array #x4000)) ;память PPU
-(defparameter *oam* (make-array (* 4 +max-sprites+))) ;память спрайтов
+(defparameter *memory* (make-array #x4000 :element-type :unsigned-byte)) ;память PPU
+(defparameter *oam* (make-array (* 4 +max-sprites+) :element-type :unsigned-byte)) ;память спрайтов
 (defparameter *control* 0) ;регистр управления
 (defparameter *mask* 0) ;регистр масок
 (defparameter *status* 0) ;регистр статуса
@@ -43,7 +43,7 @@
 (defparameter *adr* 0) ;адрес в памяти PPU
 (defparameter *name-adr* 0) ;адрес текущего тайла в таблице имен
 (defparameter *read-buf* 0) ;промежуточный буфер для чтения
-(defparameter *frame* (make-array (* +width+ +height+))) ;буфер кадра
+(defparameter *frame* (make-array (* +width+ +height+) :element-type :unsigned-byte)) ;буфер кадра
 (defparameter *frame-pos* 0) ;позиция внутри кадра
 (defparameter *fine-x* 0) ;смещение по x внутри тайла
 (defparameter *fine-y* 0) ;смещение по y внутри тайла
@@ -149,7 +149,7 @@
 
 (defun inc-adr ()
   "Увеличить адрес"
-  (setf *adr* (logand #x3FFF (+ *adr* (if (= (control-inc) 0) 1 32)))))
+  (incf *adr* (if (= (control-inc) 0) 1 32)))
 
 (defun data-rd ()
   "Чтение данных PPU"
@@ -264,8 +264,8 @@
 
 (defun get-color (pal pix)
   "Получить цвет для палитры, (фона/спрайтов) и пикселя"
-  (apply-grey (if (and (= (mask-show-back) 0) (= (mask-show-sprites) 0))
-		  (svref *memory* +palette+) ;постоянный цвет, когда все выключено
+  (apply-grey (if (or (= pix 0) (and (= (mask-show-back) 0) (= (mask-show-sprites) 0)))
+		  (svref *memory* +palette+) ;постоянный цвет, когда все выключено или цвет фона
       (svref *memory* (+ +palette+ (ash pal 2) pix)))))
 
 (defun get-pixel (tile-adr x)
