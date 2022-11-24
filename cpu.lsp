@@ -103,61 +103,55 @@
 
 (defun absolute ()
   "Режим адресации - операнд из памяти, адрес - 2 байта"
-  (setf op-adr (fetch-word))
-  (mem:rd op-adr))
+  (setf op-adr (fetch-word)))
 
 (defmacro make-abs (name reg)
   `(defun ,name ()
      (setf op-adr (fetch-word))
      (setf cross (is-cross op-adr ,reg))
-     (setf op-adr (+ ,reg op-adr))
-     (mem:rd op-adr)))
+     (setf op-adr (+ ,reg op-adr))))
 
 (make-abs absx X) ;Режим адресации - операнд из памяти, адрес - 2 байта со смещением X
 (make-abs absy Y) ;Режим адресации - операнд из памяти, адрес - 2 байта со смещением Y
 
-(defun imm () (fetch)); Режим адресации - непосредственный операнд
+(defun imm () ; Режим адресации - непосредственный операнд
+  (fetch)
+  (setf op-adr (- PC 1)))
 
 (defun impl ()); Режим адресации - без операндов
 
 (defun ind ()
   "Режим адресации - косвенный, адрес 2 байта содержит адрес операнда"
-  (setf op-adr (read-word (fetch-word)))
-  (mem:rd op-adr))
+  (setf op-adr (read-word (fetch-word))))
 
 (defun xind ()
   "Режим адресации - адрес в нулевой странице со смещением X содержит адрес операнда"
   (setf op-adr (+ (fetch) X))
   (setf op-adr (logand op-adr #xFF))
-  (setf op-adr (read-word op-adr))
-  (mem:rd op-adr))
+  (setf op-adr (read-word op-adr)))
 
 (defun indy ()
   "Режим адресации - адрес в нулевой странице содержит адрес, операнд находится со смещением Y"
   (setf op-adr (fetch))
   (setf op-adr (read-word op-adr))
   (setf cross (is-cross op-adr Y))
-  (setf op-adr (+ op-adr Y))
-  (mem:rd op-adr))
+  (setf op-adr (+ op-adr Y)))
 
 (defun rel ()
   "Режим адресации - операнд 1 байт со знаком"
-  (to-signed (fetch)))
+  (imm))
 
 (defun zero ()
   "Режим адресации - адрес операнда в нулевой странице"
-  (setf op-adr (logand (fetch) #xFF))
-  (mem:rd op-adr))
+  (setf op-adr (logand (fetch) #xFF)))
 
 (defun zerox ()
   "Режим адресации - адрес операнда в нулевой странице со смещением X"
-  (setf op-adr (logand #xFF (+ X (fetch))))
-  (mem:rd op-adr))
+  (setf op-adr (logand #xFF (+ X (fetch)))))
 
 (defun zeroy ()
   "Режим адресации - адрес операнда в нулевой странице со смещением Y"
-  (setf op-adr (logand (+ Y (fetch)) #xFF))
-  (mem:rd op-adr))
+  (setf op-adr (logand (+ Y (fetch)) #xFF)))
 
 (defmacro set-zero-neg (v)
   "Установить флаги нуля и знака"
@@ -182,14 +176,14 @@
   `(setf ,var (if (= ,bit 1) (logior (ash 1 ,pos) ,var)
 	 (logand (lognot (ash 1 ,pos)) ,var))))
 
-(defun no (adr op)
+(defun no (adr)
   "Пустой код операции"
   (error "NO OP"))
 
 (defmacro make-sum (name f carry &rest body)
   "Функции сложения, вычитания"
-  `(defun ,name (adr op)
-     (let ((b A))
+  `(defun ,name (adr)
+     (let ((b A) (op (mem:rd adr)))
        (setf A (,f A op ,carry))
        (if (> (logand (logxor b A) (logxor op A) #x80) 0)
 	   (|set-over|) (|clear-over|))
@@ -203,8 +197,8 @@
 
 (defmacro make-log (name f)
   "Логические функции"
-  `(defun ,name (adr op)
-     (setf A (,f A op))
+  `(defun ,name (adr)
+     (setf A (,f A (mem:rd adr)))
      (set-zero-neg A)
      (setf add-cycle cross)))
 
@@ -212,14 +206,16 @@
 (make-log EOR logxor) ;Исключающее ИЛИ аккумулятора с операндом
 (make-log ORA logior) ;Побитовое ИЛИ аккумулятора с операндом
 
+(defun is-accum () (eql (instr-mem cur-instr) #'acc)) ;true - текущий режим - аккумулятор
+
 (defmacro make-sh (name sh &rest body)
   "Функции сдвигов"
-  `(defun ,name (adr op)
-     (let ((res (ash op ,sh)))
+  `(defun ,name (adr)
+     (let* ((op (if (is-accum)  A (mem:rd adr)))
+	    (res (ash op ,sh)))
        ,@body
        (set-zero-neg res)
-       (if (eql (instr-mem cur-instr) #'acc)
-	   (setf A res) (mem:wrt adr res)))))
+       (if (is-accum) (setf A res) (mem:wrt adr res)))))
 
 (make-sh ASL 1 (set-carry res)) ;Арифметический сдвиг влево операнда
 (make-sh LSR -1 (if (= (logand op 1) 1)
@@ -231,10 +227,11 @@
 
 (defmacro make-br (fun flag res)
   "Команды условного перехода"
-  `(defun ,fun (adr op)
-     (when (= (,flag) ,res)
-       (setf add-cycle (+ 1 (is-cross PC op)))
-       (setf PC (+ PC op)))))
+  `(defun ,fun (adr)
+     (let ((op (to-signed (mem:rd adr))))
+       (when (= (,flag) ,res)
+	 (setf add-cycle (+ 1 (is-cross PC op)))
+	 (setf PC (+ PC op))))))
 
 (make-br BCC |get-carry| 0) ;Переход если нет переноса
 (make-br BCS |get-carry| 1) ;Переход если перенос
@@ -245,29 +242,30 @@
 (make-br BVC |get-over| 0) ;Переход если не переполнение
 (make-br BVS |get-over| 1) ;Переход если переполнение
 
-(defun BIT* (adr op)
+(defun BIT* (adr)
   "Тест битов"
-  (set-zero-neg (logand A op))
-  (if (= (ash op -7) 1) (|set-neg|) (|clear-neg|))
-  (if (= (logand (ash op -6) 1) 1) (|set-over|) (|clear-over|)))
+  (let ((op (mem:rd adr)))
+    (set-zero-neg (logand A op))
+    (if (= (ash op -7) 1) (|set-neg|) (|clear-neg|))
+    (if (= (logand (ash op -6) 1) 1) (|set-over|) (|clear-over|))))
 
-(defun BRK (adr op)
+(defun BRK (adr)
   "Программное прерывание IRQ"
   (|set-brk|)
   (interrupt :brk))
 
-(defun CLC (adr op) (|clear-carry|)) ;очистка переноса
-(defun CLD (adr op) (|clear-dec|)) ;очистка десятичного режима
-(defun CLI (adr op) (|clear-int|)) ;очистка запрета прерываний
-(defun CLV (adr op) (|clear-over|)) ;очистка переполнения
-(defun SEC (adr op) (|set-carry|)) ;установка переноса
-(defun SED (adr op) (|set-dec|)) ;установка десятичного режима
-(defun SEI (adr op) (|set-int|)) ;установка запрета прерываний
+(defun CLC (adr) (|clear-carry|)) ;очистка переноса
+(defun CLD (adr) (|clear-dec|)) ;очистка десятичного режима
+(defun CLI (adr) (|clear-int|)) ;очистка запрета прерываний
+(defun CLV (adr) (|clear-over|)) ;очистка переполнения
+(defun SEC (adr) (|set-carry|)) ;установка переноса
+(defun SED (adr) (|set-dec|)) ;установка десятичного режима
+(defun SEI (adr) (|set-int|)) ;установка запрета прерываний
 
 (defmacro make-comp (name reg)
   "Функция сравнения"
-  `(defun ,name (adr op)
-     (let ((res (- ,reg op)))
+  `(defun ,name (adr)
+     (let ((res (- ,reg (mem:rd adr))))
        (if (>= res 0) (|set-carry|) (|clear-carry|))
        (set-zero-neg res)
        (setf add-cycle cross))))
@@ -278,27 +276,27 @@
 
 (defmacro make-i (name f w &rest body)
   "Функция для увеличения/уменьшения"
-  `(defun ,name (adr op)
+  `(defun ,name (adr)
      (let ((r ,w))
        (,f r)
        ,@body
        (set-zero-neg r))))
 
-(make-i DEC decb op (mem:wrt adr r)) ;уменьшить ячейку памяти
+(make-i DEC decb (mem:rd adr) (mem:wrt adr r)) ;уменьшить ячейку памяти
 (make-i DEX decb X (setf X r)) ;уменьшить X
 (make-i DEY decb Y (setf Y r)) ;уменьшить Y
-(make-i INC incb op (mem:wrt adr r)) ;увеличить ячейку памяти
+(make-i INC incb (mem:rd adr) (mem:wrt adr r)) ;увеличить ячейку памяти
 (make-i INX incb X (setf X r)) ;увеличить X
 (make-i INY incb Y (setf Y r)) ;увеличить Y
 
-(defun JMP (adr op) (setf PC adr)) ;безусловный переход
+(defun JMP (adr) (setf PC adr)) ;безусловный переход
 
-(defun JSR (adr op) (decf PC) (st-push-pc) (setf PC adr)) ;вызов подпрограммы
+(defun JSR (adr) (decf PC) (st-push-pc) (setf PC adr)) ;вызов подпрограммы
 
 (defmacro make-ld (name reg)
   "Функции загрузки"
-  `(defun ,name (adr op)
-     (setf ,reg op)
+  `(defun ,name (adr)
+     (setf ,reg (mem:rd adr))
      (set-zero-neg ,reg)
      (setf add-cycle cross)))
 
@@ -306,26 +304,26 @@
 (make-ld LDX X) ;загрузить X
 (make-ld LDY Y) ;загрузить X
 
-(defun NOP (adr op)) ;Пустая команда
+(defun NOP (adr)) ;Пустая команда
 
-(defun PHA (adr op) (st-push A)) ;Сохранить аккумулятор в стек
-(defun PHP (adr op) (|set-brk|) (st-push ST)) ; Сохранить флаги в стек
-(defun PLA (adr op) (setf A (st-pop)) (set-zero-neg A)) ;Восстановить аккумулятор
-(defun PLP (adr op) (setf ST (st-pop))) ;Восстановить флаги
+(defun PHA (adr) (st-push A)) ;Сохранить аккумулятор в стек
+(defun PHP (adr) (|set-brk|) (st-push ST)) ; Сохранить флаги в стек
+(defun PLA (adr) (setf A (st-pop)) (set-zero-neg A)) ;Восстановить аккумулятор
+(defun PLP (adr) (setf ST (st-pop))) ;Восстановить флаги
 
-(defun RTI (adr op) (PLP adr op) (st-pop-pc)) ;Возврат из прерывания
-(defun RTS (adr op) (st-pop-pc) (incf PC)) ;Возврат из подпрограммы
+(defun RTI (adr) (PLP adr) (st-pop-pc)) ;Возврат из прерывания
+(defun RTS (adr) (st-pop-pc) (incf PC)) ;Возврат из подпрограммы
 
-(defun STA (adr op) (mem:wrt adr A)) ;Сохранение аккумулятора
-(defun STX (adr op) (mem:wrt adr X)) ;Сохранение X
-(defun STY (adr op) (mem:wrt adr Y)) ;Сохранение Y
+(defun STA (adr) (mem:wrt adr A)) ;Сохранение аккумулятора
+(defun STX (adr) (mem:wrt adr X)) ;Сохранение X
+(defun STY (adr) (mem:wrt adr Y)) ;Сохранение Y
 
-(defun TAX (adr op) (setf X A) (set-zero-neg X)) ;A -> X
-(defun TAY (adr op) (setf Y A) (set-zero-neg Y)) ;A -> Y
-(defun TSX (adr op) (setf X SP) (set-zero-neg X)) ;SP -> X
-(defun TXA (adr op) (setf A X) (set-zero-neg A)) ;X -> A
-(defun TYA (adr op) (setf A Y) (set-zero-neg A)) ;Y -> A
-(defun TXS (adr op) (setf SP X)) ;X -> SP
+(defun TAX (adr) (setf X A) (set-zero-neg X)) ;A -> X
+(defun TAY (adr) (setf Y A) (set-zero-neg Y)) ;A -> Y
+(defun TSX (adr) (setf X SP) (set-zero-neg X)) ;SP -> X
+(defun TXA (adr) (setf A X) (set-zero-neg A)) ;X -> A
+(defun TYA (adr) (setf A Y) (set-zero-neg A)) ;Y -> A
+(defun TXS (adr) (setf SP X)) ;X -> SP
 
 (defparameter *table* ;Таблица инструкций
   (make-array 256 :initial-element
@@ -492,17 +490,17 @@
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
-  (format t "~X:" PC)
+  ;(format t "~X:" PC)
   (setf a1 (mem:rd (+ PC 1)))
   (setf a2 (mem:rd (+ PC 2)))
   (let* ((o (fetch)))
     (setf cur-instr (svref *table* o))
     (setf add-cycle 0)
     (setf cross 0)
-    (let ((op (funcall (instr-mem cur-instr))))
-      (funcall (instr-cmd cur-instr) op-adr op)
-     (format T " ~S ~S ~X ~X    A:~X X:~X Y:~X ST:~X SP:~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) op-adr op A X Y ST SP)
-      (+ (instr-cycle cur-instr) add-cycle))))
+    (funcall (instr-mem cur-instr))
+    (funcall (instr-cmd cur-instr) op-adr)
+ ;    (format T " ~S ~S ~X ~X    A:~X X:~X Y:~X ST:~X SP:~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) op-adr op A X Y ST SP)
+    (+ (instr-cycle cur-instr) add-cycle)))
 
 (setf (get :brk 'vec) mem:+irq-vector+)
 (setf (get :irq 'vec) mem:+irq-vector+)
