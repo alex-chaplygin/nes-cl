@@ -43,7 +43,7 @@
 (defparameter *adr* 0) ;адрес в памяти PPU
 (defparameter *name-adr* 0) ;адрес текущего тайла в таблице имен
 (defparameter *read-buf* 0) ;промежуточный буфер для чтения
-(defparameter *frame* (make-array (* +width+ +height+) :element-type :unsigned-byte)) ;буфер кадра
+(defparameter *frame* nil) ;(make-array (* +width+ +height+) :element-type :unsigned-byte)) ;буфер кадра
 (defparameter *frame-pos* 0) ;позиция внутри кадра
 (defparameter *fine-x* 0) ;смещение по x внутри тайла
 (defparameter *fine-y* 0) ;смещение по y внутри тайла
@@ -193,8 +193,8 @@
   `(defun ,name (a ,@args)
      (let ((r (gethash a *regs*)))
        (when (null r) (error "PPU invalid address"))
-       (if (null (,f r)) 0;(error "PPU cannot rd/wr from reg"))
-       (funcall (,f r) ,@args)))))
+       (if (null (,f r)) (error "PPU cannot rd/wr from reg"))
+       (funcall (,f r) ,@args))))
 
 (rd/wr rd () reg-rd)
 (rd/wr wrt (v) reg-wrt)
@@ -312,7 +312,7 @@
 
 (defun render-pixel (pix)
   "Отрисовать точку"
-  (setf (svref *frame* *frame-pos*) pix))
+  (setf (cffi:mem-aref *frame* :unsigned-char *frame-pos*) pix))
 
 (defun next-pixel ()
   "Перейти к следующей точке"
@@ -448,11 +448,11 @@
 	    (t (set-tile-y (+ y 1)))))))
   (setf *begin-line* *name-adr*))
 
-(defun get-frame ()
+(defun get-frame (frame)
   "Получить кадр"
+  (setf *frame* frame)
   (begin-frame)
   (dotimes (i +height+)
     (setf *screen-y* i)
     (scanline)
-    (next-line))
-  *frame*)
+    (next-line)))
