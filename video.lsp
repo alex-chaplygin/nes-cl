@@ -6,7 +6,7 @@
 
 (defun init-lib ()
   (cffi:define-foreign-library video
-    (t (:default "/tmp/video")))
+    (t (:default "./video")))
   (cffi:use-foreign-library video)
   (cffi:defcfun "video_init" :void (scale :int))
   (cffi:defcfun "video_update" :void (buf :pointer))
