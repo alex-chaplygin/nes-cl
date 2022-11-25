@@ -1,7 +1,8 @@
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y))
+  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr))
 (in-package :cpu)
+(declaim (inline fetch read-word))
 (defvar PC 0) ;указатель команд
 (defvar A 0) ;аккумулятор
 (defvar X 0) ;индекс 1
@@ -72,7 +73,6 @@
   (let* ((l (st-pop)) (h (st-pop)))
     (setf PC (make-word l h))))
 
-(declaim (inline fetch))
 (defun fetch ()
   "Загрузить очередной байт по указателю команд"
   (let ((v (mem:rd PC)))

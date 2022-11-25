@@ -15,7 +15,7 @@
   (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+))
 
 (in-package :ppu)
-
+(declaim (inline apply-grey))
 (defconstant +chr0+ #x0000) ;адрес таблицы шаблонов 0
 (defconstant +chr1+ #x1000) ;адрес таблицы шаблонов 1
 (defconstant +name0+ #x2000) ;адрес таблицы имен 0
