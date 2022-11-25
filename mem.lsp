@@ -2,16 +2,17 @@
   (:use :cl)
   (:export :rd :wrt :write-bank1 :write-bank2 +nmi-vector+ +irq-vector+ +reset-vector+))
 (in-package :mem)
-(defparameter *table* ())
+(declaim (inline ram-read ram-write rom-read rd wrt))
+(defparameter *table* (make-array 6))
 (defstruct rec
   upper
   read
   write)
 (defparameter *memory* (make-array #x10000 :element-type :unsigned-byte))
 
-(defun mem (upper read write)
+(defun mem (i upper read write)
   "Запись в таблицу регионов памяти"
-  (setf *table* (append *table* (list (make-rec :upper upper :read read :write write)))))
+  (setf (svref *table* i) (make-rec :upper upper :read read :write write)))
 
 (defun ram-read (adr)
   "Чтение ОЗУ"
@@ -28,12 +29,12 @@
 (defun cart-write (adr val) (setf (svref *memory* adr) val))
 
 ;; таблица памяти
-(mem #x2000 #'ram-read #'ram-write)
-(mem #x4000 #'ppu:rd #'ppu:wrt)
-(mem #x4014 #'io:rd #'io:wrt)
-(mem #x4015 #'ppu:rd #'ppu:wrt)
-(mem #x8000 #'rom-read #'cart-write)
-(mem #x10000 #'rom-read #'map:wrt)
+(mem 0 #x2000 #'ram-read #'ram-write)
+(mem 1 #x4000 #'ppu:rd #'ppu:wrt)
+(mem 2 #x4014 #'io:rd #'io:wrt)
+(mem 3 #x4015 #'ppu:rd #'ppu:wrt)
+(mem 4 #x8000 #'rom-read #'cart-write)
+(mem 5 #x10000 #'rom-read #'map:wrt)
 
 (defconstant +nmi-vector+ #xFFFA)
 (defconstant +reset-vector+ #xFFFC)
@@ -43,14 +44,12 @@
 
 (defmacro m (name func par)
   `(defun ,name (,@par)
-     (defun f (rec tail)
-       (let ((adr (logand adr #xFFFF)))
-	 (if (< adr (rec-upper rec))
-	     (funcall (,func rec) ,@par)
-	     (if (null tail)
-		 (error ",name неверный адрес")
-		 (f (car tail) (cdr tail))))))
-    (f (car *table*) (cdr *table*))))
+     (let ((adr (logand adr #xFFFF)))
+       (do ((i 0 (+ i 1)))
+	   ((> i 6) 'done)
+	 (let ((rec (svref *table* i)))
+	   (if (< adr (rec-upper rec))
+	       (return (funcall (,func rec) ,@par))))))))
   
 (m rd rec-read (adr))
 (m wrt rec-write (adr val))
