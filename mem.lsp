@@ -3,7 +3,7 @@
   (:export :rd :wrt :write-bank1 :write-bank2 +nmi-vector+ +irq-vector+ +reset-vector+))
 (in-package :mem)
 (declaim (inline ram-read ram-write rom-read rd wrt))
-(defparameter *table* (make-array 6))
+(defparameter *table* (make-array 7))
 (defstruct rec
   upper
   read
@@ -33,8 +33,9 @@
 (mem 1 #x4000 #'ppu:rd #'ppu:wrt)
 (mem 2 #x4014 #'io:rd #'io:wrt)
 (mem 3 #x4015 #'ppu:rd #'ppu:wrt)
-(mem 4 #x8000 #'rom-read #'cart-write)
-(mem 5 #x10000 #'rom-read #'map:wrt)
+(mem 4 #x4018 #'io:rd #'io:wrt)
+(mem 5 #x8000 #'rom-read #'cart-write)
+(mem 6 #x10000 #'rom-read #'map:wrt)
 
 (defconstant +nmi-vector+ #xFFFA)
 (defconstant +reset-vector+ #xFFFC)
@@ -46,7 +47,7 @@
   `(defun ,name (,@par)
      (let ((adr (logand adr #xFFFF)))
        (do ((i 0 (+ i 1)))
-	   ((> i 6) 'done)
+	   ((> i 7) 'done)
 	 (let ((rec (svref *table* i)))
 	   (if (< adr (rec-upper rec))
 	       (return (funcall (,func rec) ,@par))))))))
