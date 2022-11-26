@@ -1,6 +1,6 @@
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr))
+  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr :read-word))
 (in-package :cpu)
 (declaim (inline fetch read-word))
 (defvar PC 0) ;указатель команд
@@ -82,7 +82,8 @@
 (defun read-word (op-adr)
   "Прочитать слово из памяти"
   (let* ((l (mem:rd op-adr))
-	 (h (if (= (logand op-adr #xFF) #xFF) (mem:rd 0) (mem:rd (+ 1 op-adr)))))
+	 (h (if (= (logand op-adr #xFF) #xFF)
+		(mem:rd (logand op-adr #xFF00)) (mem:rd (+ 1 op-adr)))))
     (make-word l h)))
 
 (defun fetch-word ()
@@ -490,7 +491,7 @@
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
-  ;(format t "~X:" PC)
+;  (format t "~X:" PC)
   (setf a1 (mem:rd (+ PC 1)))
   (setf a2 (mem:rd (+ PC 2)))
   (let* ((o (fetch)))
@@ -499,7 +500,7 @@
     (setf cross 0)
     (funcall (instr-mem cur-instr))
     (funcall (instr-cmd cur-instr) op-adr)
- ;    (format T " ~S ~S ~X ~X    A:~X X:~X Y:~X ST:~X SP:~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) op-adr op A X Y ST SP)
+;     (format T " ~S ~S ~X    A:~X X:~X Y:~X ST:~X SP:~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) op-adr A X Y ST SP)
     (+ (instr-cycle cur-instr) add-cycle)))
 
 (setf (get :brk 'vec) mem:+irq-vector+)
