@@ -15,6 +15,17 @@ int r_mask = 1;
 int g_mask = 1;
 int b_mask = 1;
 
+struct {
+  byte A:1;
+  byte B:1;
+  byte select:1;
+  byte start:1;
+  byte up:1;
+  byte down:1;
+  byte left:1;
+  byte right:1;
+} buttons; /**< состояние кнопок */
+
 void set_palette();
 
 /** 
@@ -51,6 +62,20 @@ void video_init(int scale)
   video_buffer = screen->pixels;
 }
 
+void set_key(int scan, int press)
+{
+  switch (scan) {
+  case SDL_SCANCODE_SPACE: buttons.A = press; break;
+  case SDL_SCANCODE_TAB: buttons.B = press; break;
+  case SDL_SCANCODE_S: buttons.select = press; break;
+  case SDL_SCANCODE_RETURN: buttons.start = press; break;
+  case SDL_SCANCODE_UP: buttons.up = press; break;
+  case SDL_SCANCODE_DOWN: buttons.down = press; break;
+  case SDL_SCANCODE_LEFT: buttons.left = press; break;
+  case SDL_SCANCODE_RIGHT: buttons.right = press; break;
+  }
+}
+
 /// Обработка событий клавиатуры и мыши
 int video_get_events()
 {
@@ -58,10 +83,10 @@ int video_get_events()
   if (SDL_PollEvent(&e)) {
     if (e.type == SDL_QUIT)
       return 0;
-    /*    else if (e.type == SDL_KEYDOWN)
-      set_key(e.key.keysym.scancode, e.key.keysym.sym, e.key.keysym.mod);
+    else if (e.type == SDL_KEYDOWN)
+      set_key(e.key.keysym.scancode, 1);
     else if (e.type == SDL_KEYUP)
-    release_key(e.key.keysym.scancode);*/
+      set_key(e.key.keysym.scancode, 0);
   }
   return 1;
 }
@@ -131,4 +156,9 @@ void set_palette_mask(int r, int g, int b)
   g_mask = g;
   b_mask = b;
   set_palette();
+}
+
+int video_read_buttons()
+{
+  return *(byte *)&buttons;
 }
