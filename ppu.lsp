@@ -15,7 +15,7 @@
   (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+))
 
 (in-package :ppu)
-(declaim (inline apply-grey))
+(declaim (inline apply-grey rd-mem get-bit mirror-h mirror-v mirror-s get-tile-y get-tile-x mask-show-back mask-grey mask-show-back-8 mask-show-sprites mask-show-sprite-8 control-back-pat get-table get-attrib control-sprite-size render-pixel combine get-pattern get-attrib))
 (defconstant +chr0+ #x0000) ;адрес таблицы шаблонов 0
 (defconstant +chr1+ #x1000) ;адрес таблицы шаблонов 1
 (defconstant +name0+ #x2000) ;адрес таблицы имен 0
