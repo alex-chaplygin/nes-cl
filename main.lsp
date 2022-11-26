@@ -1,5 +1,6 @@
 (load "~/quicklisp/setup.lisp")
 (ql:quickload :cffi)
+(load "video.lsp")
 (load "ppu.lsp")
 (load "io.lsp")
 (load "mmc1.lsp")
@@ -7,4 +8,3 @@
 (load "mem.lsp")
 (load "cpu.lsp")
 (load "cart.lsp")
-(load "video.lsp")
