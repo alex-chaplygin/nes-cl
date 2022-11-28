@@ -6,7 +6,7 @@
   (:export :one-cmd :interrupt :add-cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr*))
+  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr* :mirror-adr))
 (defpackage :video
   (:use :cl)
   (:export :set-palette-mask))
@@ -133,7 +133,7 @@
 
 (defmacro incb (v)
   "Увеличить переменную байт на 1"
-  (declare (unsigned-byte v))  
+;  (declare (unsigned-byte v))  
   `(progn
      (incf ,v)
      (when (> ,v 255)
@@ -141,7 +141,7 @@
 
 (defun oam-data-wrt (v)
   "Записать данные спрайтов"
-  (declare (unsigned-byte v))  
+;  (declare (unsigned-byte v))  
   (setf (svref *oam* *oam-adr*) v)
   (incb *oam-adr*))
 
@@ -170,7 +170,7 @@
 
 (defun data-wrt (d)
   "Запись в PPU"
-  (setf (svref *memory* *adr*) d)
+  (setf (svref *memory* (mirror-adr *adr*)) d)
   (inc-adr))
 
 (defun oam-dma (page)
@@ -239,17 +239,24 @@
 
 (defun mirror-s (adr) (logand adr #xF0FF)) ;один экран
 
-(defun rd-mem (adr)
-  "Прочитать значение из памяти с учетом зеркалирования"
+(defun mirror-palette (adr)
+  "Зеркалирование адресов палитры"
+  (if (and (>= adr #x3F10) (= (logand adr 3) 0)) (- adr #x10) adr))
+
+(defun mirror-adr (adr)
   (let* ((m cart:*mirror*)
 	 (a (logand adr #x2FFF))
-	 (ad (if (>= adr +palette+) adr
+	 (ad (if (>= adr +palette+) (mirror-palette adr)
 		 (cond
 		   ((eql m :horizontal) (mirror-h a))
 		   ((eql m :vertical) (mirror-v a))
 		   ((eql m :single) (mirror-s a))
 		   ((eql m :4screen) a)))))
-    (svref *memory* (logand ad #x3FFF))))
+    (logand ad #x3FFF)))
+
+(defun rd-mem (adr)
+  "Прочитать значение из памяти с учетом зеркалирования"
+    (svref *memory* (mirror-adr adr)))
 
 (defun get-tile-x () (logand #x1F *name-adr*)) ;получить координату x текущего тайла
 (defun get-tile-y () (logand #x1F (ash *name-adr* -5))) ;получить координату y текущего тайла
