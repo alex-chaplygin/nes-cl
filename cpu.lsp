@@ -13,10 +13,11 @@
 (defvar cur-instr 0); текущая запись в таблице
 (defvar cross 0); было ли пересечение страницы
 (defvar add-cycle 0);дополнительные циклы
+(declaim (integer PC op-adr cross add-cycle) (fixnum A X Y ST SP))
 
 (defstruct instr ;Структура элемента таблицы инструкций
   cmd mem cycle) ;функция команды, функция адресации, число циклов
-
+(declaim (instr cur-instr))
 (defmacro make (name num)
   "Создание функций для флагов"
   `(progn
@@ -37,6 +38,7 @@
 
 (defmacro incb (v)
   "Увеличить переменную байт на 1"
+;  (declare (unsigned-byte v))
   `(progn
      (incf ,v)
      (when (> ,v 255)
@@ -44,6 +46,7 @@
 
 (defmacro decb (v)
   "Уменьшить переменную байт на 1"
+;  (declare (unsigned-byte v))
   `(progn
      (decf ,v)
      (when (< ,v 0)
@@ -66,6 +69,7 @@
 
 (defun make-word (l h)
   "Склеить слово из 2 байт"
+;  (declare (unsigned-byte h l))
   (+ l (ash h 8)))
 
 (defun st-pop-pc ()
@@ -81,6 +85,7 @@
 
 (defun read-word (op-adr)
   "Прочитать слово из памяти"
+ ; (declare (integer op-adr))
   (let* ((l (mem:rd op-adr))
 	 (h (if (= (logand op-adr #xFF) #xFF)
 		(mem:rd (logand op-adr #xFF00)) (mem:rd (+ 1 op-adr)))))
@@ -90,10 +95,13 @@
   "Загрузить слово по указателю команд"
   (make-word (fetch) (fetch)))
 
-(defun page (adr) (ash adr -8)) ;Вычислить номер страницы по адресу
+(defun page (adr)
+  ;(declare (integer adr))
+  (ash adr -8)) ;Вычислить номер страницы по адресу
 
 (defun is-cross (adr ofs)
   "Возвращает 1, если пересечение страницы"
+  ;(declare (integer adr ofs))
   (if (= (page adr) (page (+ adr ofs))) 0 1))
 
 (defun to-signed (a)
