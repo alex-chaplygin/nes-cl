@@ -6,7 +6,7 @@
   (:export :one-cmd :interrupt :add-cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end))
+  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr*))
 (defpackage :video
   (:use :cl)
   (:export :set-palette-mask))
@@ -15,7 +15,7 @@
   (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+))
 
 (in-package :ppu)
-(declaim (inline apply-grey rd-mem get-bit mirror-h mirror-v mirror-s get-tile-y get-tile-x mask-show-back mask-grey mask-show-back-8 mask-show-sprites mask-show-sprite-8 control-back-pat get-table get-attrib control-sprite-size render-pixel combine get-pattern get-attrib))
+;(declaim (inline apply-grey rd-mem get-bit mirror-h mirror-v mirror-s get-tile-y get-tile-x mask-show-back mask-grey mask-show-back-8 mask-show-sprites mask-show-sprite-8 control-back-pat get-table get-attrib control-sprite-size render-pixel combine get-pattern get-attrib))
 (defconstant +chr0+ #x0000) ;адрес таблицы шаблонов 0
 (defconstant +chr1+ #x1000) ;адрес таблицы шаблонов 1
 (defconstant +name0+ #x2000) ;адрес таблицы имен 0
@@ -55,6 +55,7 @@
 (defparameter *back-transp* nil) ;прозрачная ли точка фона
 (defparameter *sprite-priority* 0) ;0 - впереди фона, 1 - позади фона
 (defparameter *sprite-num* 0) ;номер текущего спрайта
+(declaim (unsigned-byte *control* *mask* *status* *byte-num* *read-buf* *fine-x* *fine-y* *screen-x* *screen-y* *sprite-priority* *sprite-num*) (integer *oam-adr* *scroll* *adr* *name-adr* *frame-pos* *begin-line*))
 
 (defstruct sprite y tile atr x num) ;структура спрайта
 
@@ -97,16 +98,21 @@
 (mk/status sprite0-hit 6) ;флаг пересечения спрайта 0
 (mk/status vblank 7) ;флаг режима кадровой развертки
 
-(defun control (d) (setf *control* d)) ;записать регистр управления
+(defun control (d)
+  (declare (unsigned-byte d))  
+  (setf *control* d)) ;записать регистр управления
 
 ;(defun set-palette-mask (r g b) nil) ;переопределяется в библиотеке
 
 (defun mask (d)
   "Записать регистр маски"
+  (declare (unsigned-byte d))  
   (setf *mask* d))
 ;  (video:set-palette-mask (mask-r) (mask-g) (mask-b)))
 
-(defun oam-adr (a) (setf *oam-adr* a)) ;записать адрес памяти спрайтов
+(defun oam-adr (a)
+  (declare (integer a))  
+  (setf *oam-adr* a)) ;записать адрес памяти спрайтов
 
 (defun status ()
   "Прочитать регистр статуса"
@@ -127,6 +133,7 @@
 
 (defmacro incb (v)
   "Увеличить переменную байт на 1"
+  (declare (unsigned-byte v))  
   `(progn
      (incf ,v)
      (when (> ,v 255)
@@ -134,6 +141,7 @@
 
 (defun oam-data-wrt (v)
   "Записать данные спрайтов"
+  (declare (unsigned-byte v))  
   (setf (svref *oam* *oam-adr*) v)
   (incb *oam-adr*))
 
@@ -167,6 +175,7 @@
 
 (defun oam-dma (page)
   "ДМА передача данных спрайтов"
+  (declare (unsigned-byte page))  
   (dotimes (i 256)
     (oam-data-wrt (mem:rd (+ i (ash page 8)))))
   (setf cpu:add-cycle 514))
@@ -255,21 +264,25 @@
 
 (defun set-tile-y (y)
   "Установить строку тайлов"
+  (declare (integer y))
   (setf *name-adr* (logand *name-adr* #xFC1F))
   (incf *name-adr* (ash y 5)))
 
 (defun apply-grey (c)
   "Если черно-белый режим, то применить его к цвету"
+  (declare (integer c))
   (if (= (mask-grey) 1) (logand c #x30) c))
 
 (defun get-color (pal pix)
   "Получить цвет для палитры, (фона/спрайтов) и пикселя"
+  (declare (integer pal pix))
   (apply-grey (if (or (= pix 0) (and (= (mask-show-back) 0) (= (mask-show-sprites) 0)))
 		  (svref *memory* +palette+) ;постоянный цвет, когда все выключено или цвет фона
       (svref *memory* (+ +palette+ (ash pal 2) pix)))))
 
 (defun get-pixel (tile-adr x)
   "Вычислить значение пикселя из тайла"
+  (declare (integer tile-adr x))
   (let ((blow (svref *memory* tile-adr))
 	(bhigh (svref *memory* (+ tile-adr 8))))
     (+ (get-bit blow x)
@@ -278,7 +291,7 @@
 (defun get-attrib ()
   "Получить атрибут(номер палитры) текущего тайла"
   (let* ((adr (logior +attrib+ (ash (get-table) 10);адрес тайла
-		      (ash (get-tile-y) -1) (ash (get-tile-x) -2)))
+		       (ash (ash (get-tile-y) -2) 3) (ash (get-tile-x) -2)))
 	 (atr (rd-mem adr)) ;значение атрибута для квадрата 4x4
 	 (x (ash (logand (get-tile-x) 3) -1)) ;координаты квадрата 2x2
 	 (y (ash (logand (get-tile-y) 3) -1))
@@ -343,18 +356,18 @@
 
 (defun get-sprite-pixel (a spr)
   "Получить точку спрайта или nil"
-  (if (not (null a)) a ;эту точку уже занял спрайт с меньшим номером
+  (if (and (not (null a)) (/= a 0)) a ;эту точку уже занял спрайт с меньшим номером
       (let ((sp-x (sprite-x spr))) ;левый угол спрайта
 	(if (or (> sp-x *screen-x*)
 		(<= (+ sp-x +tile-size+) *screen-x*)) nil ;не пересекается
 		(let* ((tile-y (if (= (sprite-flip-vert spr) 1) ;отражение по вертикали
-			 (- (- (sprites-height) 2) (- *screen-y* (sprite-y spr)))
+			 (- (- (sprites-height) 1) (- *screen-y* (sprite-y spr)))
 			 (- *screen-y* (sprite-y spr))))
 		       (tile-adr (get-pattern
 				  (get-sprite-tile spr)
 				  (get-sprite-table spr) tile-y))
 		       (tile-x (if (= (sprite-flip-horiz spr) 1) ;отражение по горизонтали
-				   (- (- +tile-size+ 2) (- *screen-x* sp-x))
+				   (- (- +tile-size+ 1) (- *screen-x* sp-x))
 				   (- *screen-x* sp-x)))
 		       (pix (get-pixel tile-adr tile-x)))
 		  (setf *sprite-transp* (= pix 0))
@@ -390,6 +403,7 @@
     (setf *name-adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10))) ;заполняем адрес тайла
     (setf *begin-line* *name-adr*)
     (setf *status* 0)
+    (clear-sprite0-hit)
     (setf *frame-pos* 0)))
 
 (defun sprite-hit (spr)
@@ -407,7 +421,7 @@
 		  (tile (svref *oam* (+ 1 adr)))
 		  (atr (svref *oam* (+ 2 adr)))
 		  (x (svref *oam* (+ 3 adr)))
-		  (s (make-sprite :y y :tile tile :atr atr :x x :num pos)))
+		  (s (make-sprite :y (+ 1 y) :tile tile :atr atr :x x :num pos)))
 	     (if (sprite-hit s)
 		 (make-sprite-list (+ pos 1) (+ 1 num) (append list (list s)))
 		 (make-sprite-list (+ pos 1) num list))))))
