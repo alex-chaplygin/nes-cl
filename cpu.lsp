@@ -1,6 +1,6 @@
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr :read-word))
+  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr :read-word :cycle))
 (in-package :cpu)
 (declaim (inline fetch read-word))
 (defvar PC 0) ;указатель команд
@@ -13,6 +13,7 @@
 (defvar cur-instr 0); текущая запись в таблице
 (defvar cross 0); было ли пересечение страницы
 (defvar add-cycle 0);дополнительные циклы
+(defvar cycle-to-exec 0);число циклов до запуска следующей команды
 (declaim (integer PC op-adr cross add-cycle) (fixnum A X Y ST SP))
 
 (defstruct instr ;Структура элемента таблицы инструкций
@@ -202,7 +203,10 @@
        (setf add-cycle cross) ,@body)))
 
 (make-sum ADC + (|get-carry|)) ;Сложение аккумулятора с операндом и переносом"
-(make-sum SBC - (- 1 (|get-carry|)) (logxor ST 1)) ;Вычитание с заемом"
+(make-sum SBC - (- 1 (|get-carry|))
+	  (if (= (|get-carry|) 1)
+	      (setf ST (logand ST #xFE))
+	      (setf ST (logior ST 1)))) ;Вычитание с заемом"
 
 (defmacro make-log (name f)
   "Логические функции"
@@ -499,16 +503,16 @@
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
-;  (format t "~X:" PC)
   (setf a1 (mem:rd (+ PC 1)))
   (setf a2 (mem:rd (+ PC 2)))
+ ; (format t "~X " PC)
   (let* ((o (fetch)))
     (setf cur-instr (svref *table* o))
+;  (format T "~d A:~2,'0X X:~2,'0X Y:~2,'0X P:~2,'0X SP:~2,'0X~%" (fun-name (instr-cmd cur-instr)) A X Y ST SP)
     (setf add-cycle 0)
     (setf cross 0)
     (funcall (instr-mem cur-instr))
     (funcall (instr-cmd cur-instr) op-adr)
-;     (format T " ~S ~S ~X    A:~X X:~X Y:~X ST:~X SP:~X~%" (fun-name (instr-cmd cur-instr)) (fun-name (instr-mem cur-instr)) op-adr A X Y ST SP)
     (+ (instr-cycle cur-instr) add-cycle)))
 
 (setf (get :brk 'vec) mem:+irq-vector+)
@@ -518,9 +522,15 @@
 
 (defun interrupt (in)
   "Вызвать прерывание в процессоре"
+  (incf cycle-to-exec 7)
   (if (and (eql in :irq) (= (|get-int|) 1)) nil
       (progn
 	(st-push-pc)
 	(st-push ST)
 	(when (eql in :reset) (setf SP #xFD) (|set-int|))
 	(setf PC (read-word (get in 'vec))))))
+
+(defun cycle ()
+  "Один цикл процессора"
+  (if (= cycle-to-exec 0) (setf cycle-to-exec (one-cmd))
+      (decf cycle-to-exec)))
