@@ -6,7 +6,7 @@
   (:export :one-cmd :interrupt :add-cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr* :mirror-adr))
+  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr* :mirror-adr :set-frame :cycle :set-sprite0-hit :clear-sprite0-hit :*mask*))
 (defpackage :video
   (:use :cl)
   (:export :set-palette-mask))
@@ -16,6 +16,7 @@
 
 (in-package :ppu)
 ;(declaim (inline apply-grey rd-mem get-bit mirror-h mirror-v mirror-s get-tile-y get-tile-x mask-show-back mask-grey mask-show-back-8 mask-show-sprites mask-show-sprite-8 control-back-pat get-table get-attrib control-sprite-size render-pixel combine get-pattern get-attrib))
+(defconstant +scanline-cycles+ 341) ;число циклов для одной линии
 (defconstant +chr0+ #x0000) ;адрес таблицы шаблонов 0
 (defconstant +chr1+ #x1000) ;адрес таблицы шаблонов 1
 (defconstant +name0+ #x2000) ;адрес таблицы имен 0
@@ -48,14 +49,15 @@
 (defparameter *fine-x* 0) ;смещение по x внутри тайла
 (defparameter *fine-y* 0) ;смещение по y внутри тайла
 (defparameter *screen-x* 0) ;x текущей точки экрана
-(defparameter *screen-y* 0) ;y текущей точки экрана
+(defparameter *screen-y* 0) ;y текущей точки экрана (номер строки)
 (defparameter *begin-line* 0) ;адрес в таблице имен в начале строки
 (defparameter *sprites-list* nil) ;список спрайтов на строке
 (defparameter *sprite-transp* nil) ;прозрачная ли точка спрайта
 (defparameter *back-transp* nil) ;прозрачная ли точка фона
 (defparameter *sprite-priority* 0) ;0 - впереди фона, 1 - позади фона
 (defparameter *sprite-num* 0) ;номер текущего спрайта
-(declaim (unsigned-byte *control* *mask* *status* *byte-num* *read-buf* *fine-x* *fine-y* *screen-x* *screen-y* *sprite-priority* *sprite-num*) (integer *oam-adr* *scroll* *adr* *name-adr* *frame-pos* *begin-line*))
+(defparameter *cycles* 0) ;счетчик циклов
+(declaim (unsigned-byte *control* *mask* *status* *byte-num* *read-buf* *fine-x* *fine-y* *screen-x* *sprite-priority* *sprite-num*) (integer *oam-adr* *scroll* *adr* *name-adr* *frame-pos* *begin-line*) (fixnum *screen-y*))
 
 (defstruct sprite y tile atr x num) ;структура спрайта
 
@@ -223,7 +225,10 @@
   (set-vblank) ;установить бит vblanc
   (when (= (control-gen-nmi) 1) (cpu:interrupt :nmi))) ;прерывание nmi 
 
-(defun vblanc-end () (clear-vblank)) ;конец кадровой развертки
+(defun vblanc-end ()
+;  (format t "Clear sprite 0 hit~%")
+  (clear-sprite0-hit)
+  (clear-vblank)) ;конец кадровой развертки
 
 (defun get-bit (byte num)
   (logand 1 (ash byte (- num 7))))
@@ -363,7 +368,8 @@
 
 (defun get-sprite-pixel (a spr)
   "Получить точку спрайта или nil"
-  (if (and (not (null a)) (/= a 0)) a ;эту точку уже занял спрайт с меньшим номером
+  (if (and (not (null a)) (not *sprite-transp*)) a 
+       ;эту точку уже занял спрайт с меньшим номером
       (let ((sp-x (sprite-x spr))) ;левый угол спрайта
 	(if (or (> sp-x *screen-x*)
 		(<= (+ sp-x +tile-size+) *screen-x*)) nil ;не пересекается
@@ -391,6 +397,7 @@
   "Вычислить пересечение спрайта 0 с фоном"
   (when (and (= *sprite-num* 0) (not *back-transp*)
 	     (not *sprite-transp*) (= (mask-show-back) 1))
+;    (format t "Set zero hit~%")
     (set-sprite0-hit)))
 
 (defun combine (bp sp)
@@ -410,7 +417,6 @@
     (setf *name-adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10))) ;заполняем адрес тайла
     (setf *begin-line* *name-adr*)
     (setf *status* 0)
-    (clear-sprite0-hit)
     (setf *frame-pos* 0)))
 
 (defun sprite-hit (spr)
@@ -477,3 +483,24 @@
     (setf *screen-y* i)
     (scanline)
     (next-line)))
+
+(defun set-frame (frame)
+  (setf *screen-y* 261)
+  (setf *cycles* 0)
+  (setf *frame* frame))
+
+(defun scanline-cycle ()
+  "Линия цикла PPU"
+  (if (and (< *screen-y* +height+) (= (logand *screen-y* 1) 1))
+      (setf *cycles* 1) (setf *cycles* 0))
+;  (format t "PPU scanline cycle ~d~%" *screen-y*)
+  (cond ((= *screen-y* 261) (vblanc-end) (begin-frame) (setf *screen-y* 0)) ;перед отрисовкой prerender
+	((< *screen-y* +height+) (scanline) (next-line)) ;отрисовка линии
+	((= *screen-y* 241) (vblanc-start))) ;начало VBlank
+  (incf *screen-y*))
+
+(defun cycle ()
+  "Один цикл PPU"
+;  (format t "PPU cycle ~d~%" *cycles*)
+  (if (>= *cycles* +scanline-cycles+) (scanline-cycle)
+      (incf *cycles*)))
