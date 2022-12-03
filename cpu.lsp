@@ -1,6 +1,6 @@
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr :read-word :cycle :ST :A :SBC :set-carry :|get-carry| :set-zero-neg))
+  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr :read-word :cycle))
 (in-package :cpu)
 (declaim (inline fetch read-word))
 (defvar PC 0) ;указатель команд
@@ -174,13 +174,9 @@
   "Вычислить знак операнда"
   (ash (logand #xFF v) -7))
 
-(defmacro set-carry (v)
+(defun set-carry (v)
   "Установить флаг переноса"
-  `(if (> (ash ,v -8) 0)
-       (progn
-	 (|set-carry|)
-	 (setf ,v (logand #xFF ,v)))
-       (|clear-carry|)))
+  (if (> (logand v #xFF00) 0) (|set-carry|) (|clear-carry|)))
 
 (defmacro set-bit (var pos bit)
   "Установить бит"
@@ -191,24 +187,28 @@
   "Пустой код операции"
   (error "NO OP"))
 
-(defmacro make-sum (name f carry &rest body)
-  "Функции сложения, вычитания"
-  `(defun ,name (adr)
-     (let ((b A) (op (,f 0 (mem:rd adr))) (c (,f 0 ,carry)))
-       (when (< op 0) (incf op 256))
-       (when (< c 0) (incf c 256))
-       (incf op c)
-       (setf A (+ A op))
-       (if (> (logand (logxor b A) (logxor op A) #x80) 0)
-	   (|set-over|) (|clear-over|))
-       ;(when (< A 0) (incf A 256))
-       (set-carry A)
-       (set-zero-neg A)
-       (setf add-cycle cross) ,@body)))
+(defun ADC (adr)
+  "Сложение аккумулятора с операндом и переносом"
+  (let ((b A) (op (mem:rd adr)) (c (|get-carry|)))
+    (setf A (+ A op c))
+    (if (> (logand (logxor b A) (logxor op A) #x80) 0)
+	(|set-over|) (|clear-over|))
+    (if (> (logand A #xFF00) 0) (|set-carry|) (|clear-carry|))
+    (setf A (logand #xFF A))
+    (set-zero-neg A)))
 
-(make-sum ADC + (|get-carry|)) ;Сложение аккумулятора с операндом и переносом"
-(make-sum SBC - (- 1 (|get-carry|)))
-;	  (if (= (|get-carry|) 1) (|clear-carry|) (|set-carry|))) ;Вычитание с заемом"
+(defun SBC (adr)
+  "Вычитание с заемом"
+  (let ((b A) (op (- 256 (mem:rd adr))) (c (- 0 (- 1 (|get-carry|)))))
+    (when (< c 0) (incf c 256))
+    (when (= op 256) (setf op c) (setf c 0))
+    (setf A (+ b op c))
+    (if (> (logand (logxor b A) (logxor op A) #x80) 0)
+	(|set-over|) (|clear-over|))
+    (if (> (logand A #xFF00) 0) (|set-carry|) (|clear-carry|))
+    (setf A (logand #xFF A))
+    (set-zero-neg A)
+    (setf add-cycle cross)))
 
 (defmacro make-log (name f)
   "Логические функции"
@@ -232,11 +232,13 @@
        (set-zero-neg res)
        (if (is-accum) (setf A res) (mem:wrt adr res)))))
 
-(make-sh ASL 1 (set-carry res)) ;Арифметический сдвиг влево операнда
+(make-sh ASL 1 (set-carry res)
+	 (setf res (logand res #xFF))) ;Арифметический сдвиг влево операнда
 (make-sh LSR -1 (if (= (logand op 1) 1)
 		    (|set-carry|) (|clear-carry|))) ;Логический сдвиг вправо
 (make-sh ROL 1 (set-bit res 0 (|get-carry|)) ;Циклический сдвиг влево
-	 (set-carry res) (set-zero-neg res))
+	 (set-carry res)
+	 (setf res (logand res #xFF)) (set-zero-neg res))
 (make-sh ROR -1 (set-bit res 7 (|get-carry|)) ;Циклический сдвиг вправо
 	 (if (= (logand op 1) 1) (|set-carry|) (|clear-carry|)))
 
