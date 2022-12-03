@@ -1,6 +1,6 @@
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr :read-word :cycle))
+  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr :read-word :cycle :ST :A :SBC :set-carry :|get-carry| :set-zero-neg))
 (in-package :cpu)
 (declaim (inline fetch read-word))
 (defvar PC 0) ;указатель команд
@@ -10,7 +10,7 @@
 (defvar ST #x24) ;состояние
 (defvar SP 0) ;указатель стека
 (defvar op-adr 0); адрес операнда
-(defvar cur-instr 0); текущая запись в таблице
+(defvar cur-instr nil); текущая запись в таблице
 (defvar cross 0); было ли пересечение страницы
 (defvar add-cycle 0);дополнительные циклы
 (defvar cycle-to-exec 0);число циклов до запуска следующей команды
@@ -34,6 +34,7 @@
 (make "int" 2)
 (make "dec" 3)
 (make "brk" 4)
+(make "ign" 5)
 (make "over" 6)
 (make "neg" 7)
 
@@ -193,20 +194,21 @@
 (defmacro make-sum (name f carry &rest body)
   "Функции сложения, вычитания"
   `(defun ,name (adr)
-     (let ((b A) (op (mem:rd adr)))
-       (setf A (,f A op ,carry))
+     (let ((b A) (op (,f 0 (mem:rd adr))) (c (,f 0 ,carry)))
+       (when (< op 0) (incf op 256))
+       (when (< c 0) (incf c 256))
+       (incf op c)
+       (setf A (+ A op))
        (if (> (logand (logxor b A) (logxor op A) #x80) 0)
 	   (|set-over|) (|clear-over|))
-       (when (< A 0) (incf A 256))
+       ;(when (< A 0) (incf A 256))
        (set-carry A)
        (set-zero-neg A)
        (setf add-cycle cross) ,@body)))
 
 (make-sum ADC + (|get-carry|)) ;Сложение аккумулятора с операндом и переносом"
-(make-sum SBC - (- 1 (|get-carry|))
-	  (if (= (|get-carry|) 1)
-	      (setf ST (logand ST #xFE))
-	      (setf ST (logior ST 1)))) ;Вычитание с заемом"
+(make-sum SBC - (- 1 (|get-carry|)))
+;	  (if (= (|get-carry|) 1) (|clear-carry|) (|set-carry|))) ;Вычитание с заемом"
 
 (defmacro make-log (name f)
   "Логические функции"
@@ -321,8 +323,9 @@
 
 (defun PHA (adr) (st-push A)) ;Сохранить аккумулятор в стек
 (defun PHP (adr) (|set-brk|) (st-push ST)) ; Сохранить флаги в стек
-(defun PLA (adr) (setf A (st-pop)) (set-zero-neg A)) ;Восстановить аккумулятор
-(defun PLP (adr) (setf ST (st-pop))) ;Восстановить флаги
+(defun PLA (adr) (setf A (st-pop)) (|clear-brk|)
+  (|set-ign|) (set-zero-neg A)) ;Восстановить аккумулятор
+(defun PLP (adr) (setf ST (st-pop)) (|set-ign|) (|clear-brk|)) ;Восстановить флаги
 
 (defun RTI (adr) (PLP adr) (st-pop-pc)) ;Возврат из прерывания
 (defun RTS (adr) (st-pop-pc) (incf PC)) ;Возврат из подпрограммы
@@ -505,10 +508,10 @@
   "Выполнить одну команду процессора, вернуть число циклов"
   (setf a1 (mem:rd (+ PC 1)))
   (setf a2 (mem:rd (+ PC 2)))
- ; (format t "~X " PC)
+  (format t "~X " PC)
   (let* ((o (fetch)))
     (setf cur-instr (svref *table* o))
-;  (format T "~d A:~2,'0X X:~2,'0X Y:~2,'0X P:~2,'0X SP:~2,'0X~%" (fun-name (instr-cmd cur-instr)) A X Y ST SP)
+  (format T "~d A:~2,'0X X:~2,'0X Y:~2,'0X P:~2,'0X SP:~2,'0X~%" (fun-name (instr-cmd cur-instr)) A X Y ST SP)
     (setf add-cycle 0)
     (setf cross 0)
     (funcall (instr-mem cur-instr))
