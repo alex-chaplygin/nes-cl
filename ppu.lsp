@@ -6,7 +6,7 @@
   (:export :one-cmd :interrupt :add-cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr* :mirror-adr :set-frame :cycle :set-sprite0-hit :clear-sprite0-hit :*mask*))
+  (:export :start :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr* :mirror-adr :set-frame :cycle :set-sprite0-hit :clear-sprite0-hit :*mask*))
 (defpackage :video
   (:use :cl)
   (:export :set-palette-mask))
@@ -102,7 +102,9 @@
 
 (defun control (d)
   (declare (unsigned-byte d))  
-  (setf *control* d)) ;записать регистр управления
+  (setf *control* d) ;записать регистр управления
+  (when (and (status-vblanc)
+	     (control-gen-nmi)) (cpu:interrupt :nmi))) 
 
 ;(defun set-palette-mask (r g b) nil) ;переопределяется в библиотеке
 
@@ -147,12 +149,13 @@
   (setf (svref *oam* *oam-adr*) v)
   (incb *oam-adr*))
 
-(defmacro make-adr (name reg)
+(defmacro make-adr (name reg &rest body)
   `(defun ,name (d)
      (if (= *byte-num* 0)
 	 (setf ,reg (logior (logand ,reg #xFF00) d))
 	 (setf ,reg (logior (logand ,reg #xFF) (ash d 8))))
-     (setf *byte-num* (logand (+ 1 *byte-num*) 1))))
+     (setf *byte-num* (logand (+ 1 *byte-num*) 1))
+     ,@body))
 
 (make-adr scroll *scroll*) ;записать данные скроллинга X Y
 (make-adr adr *adr*) ;записать адрес (старший байт, младший)
@@ -416,7 +419,7 @@
     (setf *fine-y* (logand (scroll-y) 7))
     (setf *name-adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10))) ;заполняем адрес тайла
     (setf *begin-line* *name-adr*)
-    (setf *status* 0)
+;    (setf *status* 0)
     (setf *frame-pos* 0)))
 
 (defun sprite-hit (spr)
@@ -504,3 +507,12 @@
 ;  (format t "PPU cycle ~d~%" *cycles*)
   (if (>= *cycles* +scanline-cycles+) (scanline-cycle)
       (incf *cycles*)))
+
+(defun start ()
+  (setf *control* 0)
+  (setf *mask* 0)
+  (setf *scroll* 0)
+  (setf *oam-adr* 0)
+  (setf *read-buf* 0)
+  (setf *byte-num* 1)
+  (setf *status* 0))
