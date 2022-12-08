@@ -6,7 +6,7 @@
   (:export :one-cmd :interrupt :add-cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :start :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr* :mirror-adr :set-frame :cycle :set-sprite0-hit :clear-sprite0-hit :*mask*))
+  (:export :start :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr* :mirror-adr :set-frame :cycle :set-sprite0-hit :clear-sprite0-hit :*mask* :set-bits))
 (defpackage :video
   (:use :cl)
   (:export :set-palette-mask))
@@ -38,26 +38,28 @@
 (defparameter *control* 0) ;регистр управления
 (defparameter *mask* 0) ;регистр масок
 (defparameter *status* 0) ;регистр статуса
-(defparameter *byte-num* 1) ;номер байта для адресов
+(defparameter *first-write* 0) ;номер байта для адресов
 (defparameter *oam-adr* 0) ;адрес в памяти спрайтов
 (defparameter *scroll* 0) ;регистр скроллинга
-(defparameter *adr* 0) ;адрес в памяти PPU
-(defparameter *name-adr* 0) ;адрес текущего тайла в таблице имен
+(defparameter *cur-vram-adr* 0) ;текущий адрес в памяти PPU
+(defparameter *temp-vram-adr* 0) ;временный адрес в памяти PPU
+;(defparameter *name-adr* 0) ;адрес текущего тайла в таблице имен
 (defparameter *read-buf* 0) ;промежуточный буфер для чтения
 (defparameter *frame* nil) ;(make-array (* +width+ +height+) :element-type :unsigned-byte)) ;буфер кадра
 (defparameter *frame-pos* 0) ;позиция внутри кадра
-(defparameter *fine-x* 0) ;смещение по x внутри тайла
+(defparameter *fine-x* 0) ;смещение по x внутри тайла(скроллинг)
+(defparameter *cur-fine-x* 0) ;смещение по x внутри тайла
 (defparameter *fine-y* 0) ;смещение по y внутри тайла
 (defparameter *screen-x* 0) ;x текущей точки экрана
 (defparameter *screen-y* 0) ;y текущей точки экрана (номер строки)
-(defparameter *begin-line* 0) ;адрес в таблице имен в начале строки
+;(defparameter *begin-line* 0) ;адрес в таблице имен в начале строки
 (defparameter *sprites-list* nil) ;список спрайтов на строке
 (defparameter *sprite-transp* nil) ;прозрачная ли точка спрайта
 (defparameter *back-transp* nil) ;прозрачная ли точка фона
 (defparameter *sprite-priority* 0) ;0 - впереди фона, 1 - позади фона
 (defparameter *sprite-num* 0) ;номер текущего спрайта
 (defparameter *cycles* 0) ;счетчик циклов
-(declaim (unsigned-byte *control* *mask* *status* *byte-num* *read-buf* *fine-x* *fine-y* *screen-x* *sprite-priority* *sprite-num*) (integer *oam-adr* *scroll* *adr* *name-adr* *frame-pos* *begin-line*) (fixnum *screen-y*))
+(declaim (unsigned-byte *control* *mask* *status* *first-write* *read-buf* *fine-x* *fine-y* *screen-x* *sprite-priority* *sprite-num*) (integer *oam-adr* *scroll* *cur-vram-adr* *name-adr* *frame-pos* *begin-line*) (fixnum *screen-y*))
 
 (defstruct sprite y tile atr x num) ;структура спрайта
 
@@ -100,11 +102,16 @@
 (mk/status sprite0-hit 6) ;флаг пересечения спрайта 0
 (mk/status vblank 7) ;флаг режима кадровой развертки
 
+(defmacro set-bits (reg offset num bits)
+  `(progn
+     (let ((mask (ash (- (ash 1 ,num) 1) ,offset)))
+       (setf ,reg (logand ,reg (lognot mask)))
+       (setf ,reg (logior ,reg (ash ,bits ,offset))))))
+
 (defun control (d)
   (declare (unsigned-byte d))  
   (setf *control* d) ;записать регистр управления
-  (when (and (status-vblanc)
-	     (control-gen-nmi)) (cpu:interrupt :nmi))) 
+  (set-bits *temp-vram-adr* 10 2 (logand d 3)));установка таблицы имен во временный адрес
 
 ;(defun set-palette-mask (r g b) nil) ;переопределяется в библиотеке
 
@@ -121,7 +128,7 @@
 (defun status ()
   "Прочитать регистр статуса"
   (let ((s *status*))
-    (setf *byte-num* 1) ;сброс номера байта для адресов
+    (setf *first-write* 0) ;сброс номера байта для адресов
     (clear-vblank) ;очистить флаг vblanc
     s))
 
@@ -151,31 +158,53 @@
 
 (defmacro make-adr (name reg &rest body)
   `(defun ,name (d)
-     (if (= *byte-num* 0)
+     (if (= *first-write* 1)
 	 (setf ,reg (logior (logand ,reg #xFF00) d))
 	 (setf ,reg (logior (logand ,reg #xFF) (ash d 8))))
-     (setf *byte-num* (logand (+ 1 *byte-num*) 1))
+     (setf *first-write* (logand (+ 1 *first-write*) 1))
      ,@body))
 
-(make-adr scroll *scroll*) ;записать данные скроллинга X Y
-(make-adr adr *adr*) ;записать адрес (старший байт, младший)
+(make-adr adr *cur-vram-adr*) ;записать адрес (старший байт, младший)
+
+(defun scroll (d)
+  "Запись регистра скроллинга"
+  (if (= *first-write* 0)
+      (let ((coarse-x (ash d -3))) ;смещение в тайлах по x
+	(set-bits *temp-vram-adr* 0 5 coarse-x) ;устанавливаем
+	(setf *fine-x* (logand d 7)))
+      (let ((fine-y (logand d 3))
+	    (coarse-y (ash d -3)))
+	(set-bits *temp-vram-adr* 12 3 fine-y)
+	(set-bits *temp-vram-adr* 5 5 coarse-y)))
+  (setf *first-write* (logand (+ 1 *first-write*) 1)))
+
+(defun adr (d)
+  "Запись адреса"
+  (if (= *first-write* 0)
+      (let ((temp (logand d #x3F)))
+	(set-bits *temp-vram-adr* 8 6 temp)
+	(set-bits *temp-vram-adr* 14 1 0))
+      (progn
+	(set-bits *temp-vram-adr* 0 8 d)
+	(setf *cur-vram-adr* *temp-vram-adr*)))
+  (setf *first-write* (logand (+ 1 *first-write*) 1)))
 
 (defun inc-adr ()
   "Увеличить адрес"
-  (incf *adr* (if (= (control-inc) 0) 1 32)))
+  (incf *cur-vram-adr* (if (= (control-inc) 0) 1 32)))
 
 (defun data-rd ()
   "Чтение данных PPU"
-  (let ((d (rd-mem *adr*))
+  (let ((d (rd-mem *cur-vram-adr*))
 	(buf *read-buf*))
     (inc-adr)
-    (if (< *adr* +palette+)
+    (if (< *cur-vram-adr* +palette+)
 	(progn (setf *read-buf* d) buf)
 	 d)))
 
 (defun data-wrt (d)
   "Запись в PPU"
-  (setf (svref *memory* (mirror-adr *adr*)) d)
+  (setf (svref *memory* (mirror-adr *cur-vram-adr*)) d)
   (inc-adr))
 
 (defun oam-dma (page)
@@ -216,8 +245,7 @@
 (defmacro w (name adr size)
   "Запись шаблонов"
   `(defun ,name (bank)
-     (do ((i 0 (+ i 1)))
-	 ((= i ,size) 'done)
+     (dotimes (i ,size)
        (setf (svref *memory* (+ i ,adr)) (svref bank i)))))
 
 (w write-chr0 +chr0+ cart:+chr-size+) ;записать таблицу шаблонов 0
@@ -266,22 +294,20 @@
   "Прочитать значение из памяти с учетом зеркалирования"
     (svref *memory* (mirror-adr adr)))
 
-(defun get-tile-x () (logand #x1F *name-adr*)) ;получить координату x текущего тайла
-(defun get-tile-y () (logand #x1F (ash *name-adr* -5))) ;получить координату y текущего тайла
-(defun get-table () (ash *name-adr* -10)) ;получить номер текущего экрана
-(defun scroll-x () (ash *scroll* -8)) ;вычислить позицию перемещения X
-(defun scroll-y () (logand *scroll* #xFF)) ;вычислить позицию перемещения Y
+(defun get-tile-x () (logand #x1F *cur-vram-adr*)) ;получить координату x текущего тайла
+(defun get-tile-y () (logand #x1F (ash *cur-vram-adr* -5))) ;получить координату y текущего тайла
+(defun get-table () (ash *cur-vram-adr* -10)) ;получить номер текущего экрана
+(defun get-fine-y () (ash *cur-vram-adr* -12))
 (defun sprites-height () (if (= (control-sprite-size) 0) 8 16)) ;высота спрайтов
 
 (defun clear-tile-x ()
   "Перейти на начало строки тайлов"
-  (setf *name-adr* (logand *name-adr* #xFFE0)))
+  (setf *cur-vram-adr* (logand *cur-vram-adr* #xFFE0)))
 
 (defun set-tile-y (y)
   "Установить строку тайлов"
   (declare (integer y))
-  (setf *name-adr* (logand *name-adr* #xFC1F))
-  (incf *name-adr* (ash y 5)))
+  (set-bits *cur-vram-adr* 5 5 y))
 
 (defun apply-grey (c)
   "Если черно-белый режим, то применить его к цвету"
@@ -320,21 +346,21 @@
 
 (defun switch-screen (mask)
   "Переключиться на экран по горизонтали или вертикали"
-  (setf *name-adr* (logxor *name-adr* mask)))
+  (setf *cur-vram-adr* (logxor *cur-vram-adr* mask)))
 
 (defun next-tile ()
   "Переход на следующий тайл"
   (if (= (get-tile-x) (- +width-tiles+ 1))
       (progn (switch-screen #x400) (clear-tile-x))
-      (incf *name-adr*))
-  (setf *fine-x* 0))
+      (incf *cur-vram-adr*))
+  (setf *cur-fine-x* 0))
 
 (defun back-pixel ()
   "Вычислить точку фона"
   (if (= (mask-show-back) 0) (get-color 0 0)
       (let* ((tile (rd-mem (logior +name0+ *name-adr*))) ;получаем номер тайла
-	     (tile-adr (get-pattern tile (control-back-pat) *fine-y*)) ;прочитать адрес строки тайла
-	     (pix (get-pixel tile-adr *fine-x*))) ;вычисляем пиксель тайла
+	     (tile-adr (get-pattern tile (control-back-pat) (get-fine-y))) ;прочитать адрес строки тайла
+	     (pix (get-pixel tile-adr *cur-fine-x*))) ;вычисляем пиксель тайла
 	(setf *back-transp* (= pix 0)) ;вычисляем прозрачность точки
 	(get-color (get-attrib) pix)))) ;вычисляем цвет по атрибуту
 
@@ -344,8 +370,8 @@
 
 (defun next-pixel ()
   "Перейти к следующей точке"
-  (incf *fine-x*)
-  (when (= *fine-x* +tile-size+) (next-tile)) ;перемещаемся на следующий тайл
+  (incf *cur-fine-x*)
+  (when (= *cur-fine-x* +tile-size+) (next-tile)) ;перемещаемся на следующий тайл
   (incf *frame-pos*))
 
 (defun sprite-atrib (spr)
@@ -415,8 +441,6 @@
   "Начало кадра, вычисляем начальный адрес в таблице имен"
   (let* ((coarse-x (ash (scroll-x) -3)) ;смещение по X в тайлах
 	 (coarse-y (ash (scroll-y) -3))) ;смещение по Y в тайлах
-    (setf *fine-x* (logand (scroll-x) 7)) ;смещение по X внутри тайла
-    (setf *fine-y* (logand (scroll-y) 7))
     (setf *name-adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10))) ;заполняем адрес тайла
     (setf *begin-line* *name-adr*)
 ;    (setf *status* 0)
@@ -450,8 +474,13 @@
 (mk/clip clip-sprite-left mask-show-sprite-8)
 (mk/clip clip-back-left mask-show-back-8)
 
+(defun begin-line ()
+  "Начало строки"
+  )
+
 (defun scanline ()
   "Заполнить строку кадра"
+  (begin-line)
   (setf *sprites-list*
 	(if (= (mask-show-sprites) 1)
 	    (make-sprite-list 0 0 nil) nil)) ;создать список спрайтов на текущей строке
@@ -465,8 +494,8 @@
 
 (defun next-line ()
   "Перейти к следующей строке"
-  (setf *fine-x* (logand (scroll-x) 7))
-  (setf *name-adr* *begin-line*)
+  (setf *cur-fine-x* *fine-x*)
+  (setf *fine-y* (get-fine-y))
   (if (< *fine-y* 7) (incf *fine-y*)
       (progn
 	(setf *fine-y* 0)
@@ -476,7 +505,7 @@
 	     (switch-screen #x800) (set-tile-y 0))
 	    ((= y (- +width-tiles+ 1)) (set-tile-y 0))
 	    (t (set-tile-y (+ y 1)))))))
-  (setf *begin-line* *name-adr*))
+  (set-bits *cur-vram-adr* 0 5 (logand *temp-vram-adr* #x1F)) ;вернулись в начало строки
 
 (defun get-frame (frame)
   "Получить кадр"
@@ -514,5 +543,5 @@
   (setf *scroll* 0)
   (setf *oam-adr* 0)
   (setf *read-buf* 0)
-  (setf *byte-num* 1)
+  (setf *first-write* 0)
   (setf *status* 0))
