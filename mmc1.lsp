@@ -1,3 +1,7 @@
+(defpackage :cart
+  (:use :cl)
+  (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+ :*prg-count* :*chr-count*))
+
 (defpackage :mmc1
   (:use :cl)
   (:export :wrt :prg-mode :chr-mode))
