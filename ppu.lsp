@@ -286,8 +286,8 @@
 
 (defun get-tile-x () (logand #x1F *cur-vram-adr*)) ;получить координату x текущего тайла
 (defun get-tile-y () (logand #x1F (ash *cur-vram-adr* -5))) ;получить координату y текущего тайла
-(defun get-table () (ash *cur-vram-adr* -10)) ;получить номер текущего экрана
-(defun get-fine-y () (ash *cur-vram-adr* -12))
+(defun get-table () (logand (ash *cur-vram-adr* -10) 3)) ;получить номер текущего экрана
+(defun get-fine-y () (logand (ash *cur-vram-adr* -12) 7))
 (defun sprites-height () (if (= (control-sprite-size) 0) 8 16)) ;высота спрайтов
 
 (defun clear-tile-x ()
@@ -347,7 +347,9 @@
 
 (defun back-pixel ()
   "Вычислить точку фона"
-;  (format t "tile ~d ~d fine ~d ~d~%" (get-tile-x) (get-tile-y) *cur-fine-x* (get-fine-y))
+;  (format t "~%temp-vram-adr ~X ~b~%" *temp-vram-adr* *temp-vram-adr*)
+;  (format t "backpixel cur-vram-adr ~X ~b " *cur-vram-adr* *cur-vram-adr*)
+;  (format t "line ~d tile ~d ~d fine ~d ~d~%" *screen-y* (get-tile-x) (get-tile-y) *cur-fine-x* (get-fine-y))
   (if (= (mask-show-back) 0) (get-color 0 0)
       (let* ((tile (rd-mem (logior +name0+ (logand *cur-vram-adr* #xFFF)))) ;получаем номер тайла
 	     (tile-adr (get-pattern tile (control-back-pat) (get-fine-y))) ;прочитать адрес строки тайла
@@ -437,8 +439,8 @@
   (setf *cur-vram-adr* *temp-vram-adr*)
   (setf *cur-fine-x* *fine-x*)
   (setf *fine-y* (get-fine-y))
- ;   (format t "begin-frame~%temp-vram-adr ~X ~b~%" *temp-vram-adr* *temp-vram-adr*)
-  ;  (format t "cur-vram-adr ~X ~b~%" *cur-vram-adr* *cur-vram-adr*)
+;  (format t "begin-frame~%temp-vram-adr ~X ~b~%" *temp-vram-adr* *temp-vram-adr*)
+ ; (format t "cur-vram-adr ~X ~b~%" *cur-vram-adr* *cur-vram-adr*)
     (setf *frame-pos* 0))
 
 (defun sprite-hit (spr)
@@ -471,11 +473,14 @@
 
 (defun scanline ()
   "Заполнить строку кадра"
+ ; (format t "scanline ~d cur-vram-adr ~X ~b~%" *screen-y* *cur-vram-adr* *cur-vram-adr*)
   (setf *sprites-list*
 	(if (= (mask-show-sprites) 1)
 	    (make-sprite-list 0 0 nil) nil)) ;создать список спрайтов на текущей строке
+  ;(format t "scanline after sprites ~d cur-vram-adr ~X ~b~%" *screen-y* *cur-vram-adr* *cur-vram-adr*)
   (dotimes (i +width+)
     (setf *screen-x* i)
+    ;(format t "call back cur-vram-adr ~X ~b~%" *cur-vram-adr* *cur-vram-adr*)
     (let* ((bp (if (clip-back-left) (get-color 0 0) (back-pixel)))
 	   (sp (if (clip-sprite-left) nil (sprite-pixel)))
 	   (cp (combine bp sp)))
@@ -498,7 +503,7 @@
   (set-bits *cur-vram-adr* 0 5 (logand *temp-vram-adr* #x1F))
   (set-bits *cur-vram-adr* 10 1 (logand (ash *temp-vram-adr* -10) 1))
   (set-bits *cur-vram-adr* 12 3 *fine-y*)
-  (format t "line ~d cur-vram-adr ~X ~b~%" *screen-y* *cur-vram-adr* *cur-vram-adr*)
+  ;(format t "line ~d cur-vram-adr ~X ~b~%" *screen-y* *cur-vram-adr* *cur-vram-adr*)
 ) ;вернулись в начало строки
 
 (defun set-frame (frame)
@@ -511,7 +516,7 @@
   (if (and (< *screen-y* +height+) (= (logand *screen-y* 1) 1))
       (setf *cycles* 1) (setf *cycles* 0))
 ;  (format t "PPU scanline cycle ~d~%" *screen-y*)
-  (cond ((= *screen-y* 261) (vblanc-end) (begin-frame) (setf *screen-y* 0)) ;перед отрисовкой prerender
+  (cond ((= *screen-y* 261) (vblanc-end) (begin-frame) (setf *screen-y* -1)) ;перед отрисовкой prerender
 	((< *screen-y* +height+) (scanline) (next-line)) ;отрисовка линии
 	((= *screen-y* 241) (vblanc-start))) ;начало VBlank
   (incf *screen-y*))
