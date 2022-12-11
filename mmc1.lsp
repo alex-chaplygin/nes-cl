@@ -57,8 +57,8 @@
 			 ((= prg-m 3) 'fix-last)))
     (setf chr-mode (if (= chr-m 0) 'switch-8 'switch-4))
     (case prg-mode
-      ('fix-first (mem:write-bank1 (cart:get-prg 0)))
-      ('fix-last (mem:write-bank2 (cart:get-prg
+      (fix-first (mem:write-bank1 (cart:get-prg 0)))
+      (fix-last (mem:write-bank2 (cart:get-prg
 				   (- cart:*prg-count* 1)))))
     (setf cart:*mirror* (cond ((< mir 2) :single)
 			      ((= mir 2) :vertical)
@@ -69,8 +69,8 @@
   (let ((bank (if (eql chr-mode 'switch-8) (logand d #x1E)
 		  (logand d #x1F))))
     (case chr-mode
-      ('switch-8 (ppu:write-chr0 (cart:get-chr bank)))
-      ('switch-4 (ppu:write-chr0 (subseq (cart:get-chr bank) 0 4096))))))
+      (switch-8 (ppu:write-chr0 (cart:get-chr bank)))
+      (switch-4 (ppu:write-chr0 (subseq (cart:get-chr bank) 0 4096))))))
 
 (defun mmc1-chr-bank1 (d)
   (when (eql chr-mode'switch-4)
@@ -78,13 +78,13 @@
 
 (defun mmc1-prg-bank (d)
   (case prg-mode
-    ('switch-32 (let ((bank (logand d #xE)))
+    (switch-32 (let ((bank (logand d #xE)))
 		  (mem:write-bank1 (cart:get-prg bank))
 		  (mem:write-bank2 (cart:get-prg (+ 1 bank)))))
-    ('fix-first (mem:write-bank2 (cart:get-prg (logand d #xF))))
-    ('fix-last (mem:write-bank1 (cart:get-prg (logand d #xF))))))
+    (fix-first (mem:write-bank2 (cart:get-prg (logand d #xF))))
+    (fix-last (mem:write-bank1 (cart:get-prg (logand d #xF))))))
 
-(sw #xa000 #'(lambda (x)))
+(sw #xa000 #'(lambda (x) x))
 (sw #xc000 #'mmc1-chr-bank0)
 (sw #xe000 #'mmc1-chr-bank1)
 (sw #x10000 #'mmc1-prg-bank)

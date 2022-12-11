@@ -13,7 +13,7 @@
 (defparameter *prg* 0) ;память программ
 (defparameter *chr* 0) ;память изображений
 
-(defmacro mk/get (name count arr bits size)
+(defmacro mk/get (name count arr size)
   "Функции получения банков по номеру"
   `(defun ,name (num)
      (if (< num ,count)
@@ -21,16 +21,16 @@
 	   (subseq ,arr start (+ start ,size)))
 	 nil)))
 
-(mk/get get-prg *prg-count* *prg* 14 +prg-size+) ;получить PRG банк
-(mk/get get-chr *chr-count* *chr* 13 +chr-size+) ;получить CHR банк
+(mk/get get-prg *prg-count* *prg* +prg-size+) ;получить PRG банк
+(mk/get get-chr *chr-count* *chr* +chr-size+) ;получить CHR банк
 
 (defun read4 (in)
   "Прочитать 4 байта"
-  (setf res 0)
-  (dotimes (i 4)
-    (setf res (ash res 8))
-    (incf res (read-byte in)))
-  res)
+  (let ((res 0))
+    (dotimes (i 4)
+      (setf res (ash res 8))
+      (incf res (read-byte in)))
+    res))
 
 (defun make-mirror (b) ;вид зеркалирования
   (if (= b 0) :horizontal :vertical))

@@ -18,10 +18,10 @@
 
 (defun NROM (a d)
 ;  (format T "Write to mapper adr:~X val:~X~%" a v)
-  (error "write to NROM"))
+  (error "write to NROM") a d)
 
 (defun UxROM (a d)
-  (mem:write-bank1 (cart:get-prg (logand d #xF))))
+  (mem:write-bank1 (cart:get-prg (logand d #xF))) a)
 
 (mapper 0 #'NROM)
 (mapper 1 #'MMC1:wrt)

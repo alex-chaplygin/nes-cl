@@ -1,6 +1,6 @@
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt :add-cycle :PC :cur-instr :SP :Y :op-adr :read-word :cycle))
+  (:export :one-cmd :interrupt :add-cycle :cycle))
 (in-package :cpu)
 (declaim (inline fetch read-word))
 (defvar PC 0) ;указатель команд
@@ -185,7 +185,7 @@
 
 (defun no (adr)
   "Пустой код операции"
-  (error "NO OP"))
+  (error "NO OP") adr)
 
 (defun ADC (adr)
   "Сложение аккумулятора с операндом и переносом"
@@ -199,7 +199,9 @@
 
 (defun SBC (adr)
   "Вычитание с заемом"
-  (let ((b A) (op (- 256 (mem:rd adr))) (c (- 0 (- 1 (|get-carry|)))))
+  (let ((b A)
+	(op (- 256 (mem:rd adr)))
+	(c (- 0 (- 1 (|get-carry|)))))
     (when (< c 0) (incf c 256))
     (when (= op 256) (setf op c) (setf c 0))
     (setf A (+ b op c))
@@ -508,12 +510,12 @@
 
 (defun one-cmd ()
   "Выполнить одну команду процессора, вернуть число циклов"
-  (setf a1 (mem:rd (+ PC 1)))
-  (setf a2 (mem:rd (+ PC 2)))
-  (format t "~X " PC)
+  ;(setf a1 (mem:rd (+ PC 1)))
+  ;(setf a2 (mem:rd (+ PC 2)))
+ ; (format t "~X " PC)
   (let* ((o (fetch)))
     (setf cur-instr (svref *table* o))
-  (format T "~d A:~2,'0X X:~2,'0X Y:~2,'0X P:~2,'0X SP:~2,'0X~%" (fun-name (instr-cmd cur-instr)) A X Y ST SP)
+;  (format T "~d ~X A:~2,'0X X:~2,'0X Y:~2,'0X P:~2,'0X SP:~2,'0X~%" (fun-name (instr-cmd cur-instr)) op-adr A X Y ST SP)
     (setf add-cycle 0)
     (setf cross 0)
     (funcall (instr-mem cur-instr))
