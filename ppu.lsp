@@ -3,16 +3,16 @@
   (:export :rd :wrt :write-bank1 :write-bank2 +nmi-vector+ +irq-vector+ +reset-vector+))
 (defpackage :cpu
   (:use :cl)
-  (:export :one-cmd :interrupt :add-cycle))
+  (:export :one-cmd :interrupt :add-cycle :cycle))
 (defpackage :ppu
   (:use :cl)
-  (:export :start :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr* :mirror-adr :set-frame :cycle :set-sprite0-hit :clear-sprite0-hit :*mask* :set-bits))
+  (:export :start :rd :wrt :write-chr0 :write-chr1 :+name0+ :+palette+ :get-frame :setup-tiles :*memory* :get-pattern :*adr* :get-tile :*scroll* :*oam* :vblanc-start :vblanc-end :*oam-adr* :mirror-adr :set-frame :cycle :set-sprite0-hit :clear-sprite0-hit :*mask* :*cur-vram-adr* :*temp-vram-adr* :begin-frame))
 (defpackage :video
   (:use :cl)
-  (:export :set-palette-mask))
+  (:export :set-palette-mask :video-init :video-update :video-close :video-get-events :video-sleep :video-read-buttons))
 (defpackage :cart
   (:use :cl)
-  (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+))
+  (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+ :*prg-count* :*chr-count*))
 
 (in-package :ppu)
 ;(declaim (inline apply-grey rd-mem get-bit mirror-h mirror-v mirror-s get-tile-y get-tile-x mask-show-back mask-grey mask-show-back-8 mask-show-sprites mask-show-sprite-8 control-back-pat get-table get-attrib control-sprite-size render-pixel combine get-pattern get-attrib))
@@ -155,16 +155,6 @@
 ;  (declare (unsigned-byte v))  
   (setf (svref *oam* *oam-adr*) v)
   (incb *oam-adr*))
-
-(defmacro make-adr (name reg &rest body)
-  `(defun ,name (d)
-     (if (= *first-write* 1)
-	 (setf ,reg (logior (logand ,reg #xFF00) d))
-	 (setf ,reg (logior (logand ,reg #xFF) (ash d 8))))
-     (setf *first-write* (logand (+ 1 *first-write*) 1))
-     ,@body))
-
-(make-adr adr *cur-vram-adr*) ;записать адрес (старший байт, младший)
 
 (defun scroll (d)
   "Запись регистра скроллинга"
@@ -357,8 +347,9 @@
 
 (defun back-pixel ()
   "Вычислить точку фона"
+;  (format t "tile ~d ~d fine ~d ~d~%" (get-tile-x) (get-tile-y) *cur-fine-x* (get-fine-y))
   (if (= (mask-show-back) 0) (get-color 0 0)
-      (let* ((tile (rd-mem (logior +name0+ *name-adr*))) ;получаем номер тайла
+      (let* ((tile (rd-mem (logior +name0+ (logand *cur-vram-adr* #xFFF)))) ;получаем номер тайла
 	     (tile-adr (get-pattern tile (control-back-pat) (get-fine-y))) ;прочитать адрес строки тайла
 	     (pix (get-pixel tile-adr *cur-fine-x*))) ;вычисляем пиксель тайла
 	(setf *back-transp* (= pix 0)) ;вычисляем прозрачность точки
@@ -439,12 +430,16 @@
 
 (defun begin-frame ()
   "Начало кадра, вычисляем начальный адрес в таблице имен"
-  (let* ((coarse-x (ash (scroll-x) -3)) ;смещение по X в тайлах
-	 (coarse-y (ash (scroll-y) -3))) ;смещение по Y в тайлах
-    (setf *name-adr* (+ coarse-x (ash coarse-y 5) (ash (control-name) 10))) ;заполняем адрес тайла
-    (setf *begin-line* *name-adr*)
-;    (setf *status* 0)
-    (setf *frame-pos* 0)))
+  ;(let* ((coarse-y (logand (ash *temp-vram-adr* -5) #x1F)) ;смещение по Y в тайлах
+;	 (fine-y (ash *temp-vram-adr* -11)))
+;    (set-bits *cur-vram-adr* 5 5 coarse-y)
+					;    (set-bits *cur-vram-adr* 11 4 fine-y)
+  (setf *cur-vram-adr* *temp-vram-adr*)
+  (setf *cur-fine-x* *fine-x*)
+  (setf *fine-y* (get-fine-y))
+ ;   (format t "begin-frame~%temp-vram-adr ~X ~b~%" *temp-vram-adr* *temp-vram-adr*)
+  ;  (format t "cur-vram-adr ~X ~b~%" *cur-vram-adr* *cur-vram-adr*)
+    (setf *frame-pos* 0))
 
 (defun sprite-hit (spr)
   "Проверка пересекает ли спрайт текущую строчку"
@@ -474,13 +469,8 @@
 (mk/clip clip-sprite-left mask-show-sprite-8)
 (mk/clip clip-back-left mask-show-back-8)
 
-(defun begin-line ()
-  "Начало строки"
-  )
-
 (defun scanline ()
   "Заполнить строку кадра"
-  (begin-line)
   (setf *sprites-list*
 	(if (= (mask-show-sprites) 1)
 	    (make-sprite-list 0 0 nil) nil)) ;создать список спрайтов на текущей строке
@@ -505,16 +495,11 @@
 	     (switch-screen #x800) (set-tile-y 0))
 	    ((= y (- +width-tiles+ 1)) (set-tile-y 0))
 	    (t (set-tile-y (+ y 1)))))))
-  (set-bits *cur-vram-adr* 0 5 (logand *temp-vram-adr* #x1F)) ;вернулись в начало строки
-
-(defun get-frame (frame)
-  "Получить кадр"
-  (setf *frame* frame)
-  (begin-frame)
-  (dotimes (i +height+)
-    (setf *screen-y* i)
-    (scanline)
-    (next-line)))
+  (set-bits *cur-vram-adr* 0 5 (logand *temp-vram-adr* #x1F))
+  (set-bits *cur-vram-adr* 10 1 (logand (ash *temp-vram-adr* -10) 1))
+  (set-bits *cur-vram-adr* 12 3 *fine-y*)
+  (format t "line ~d cur-vram-adr ~X ~b~%" *screen-y* *cur-vram-adr* *cur-vram-adr*)
+) ;вернулись в начало строки
 
 (defun set-frame (frame)
   (setf *screen-y* 261)
