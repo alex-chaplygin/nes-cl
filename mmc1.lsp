@@ -1,6 +1,6 @@
 (defpackage :cart
   (:use :cl)
-  (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+ :*prg-count* :*chr-count*))
+  (:export :get-prg :get-chr :get-chr4 :read-ines :*mirror* :+chr-size+ :*prg-count* :*chr-count*))
 
 (defpackage :mmc1
   (:use :cl)
@@ -69,12 +69,13 @@
   (let ((bank (if (eql chr-mode 'switch-8) (logand d #x1E)
 		  (logand d #x1F))))
     (case chr-mode
-      (switch-8 (ppu:write-chr0 (cart:get-chr bank)))
-      (switch-4 (ppu:write-chr0 (subseq (cart:get-chr bank) 0 4096))))))
+      (switch-8 (ppu:write-chr04 (cart:get-chr4 bank))
+       (ppu:write-chr1 (cart:get-chr4 (+ bank 1))))
+      (switch-4 (ppu:write-chr04 (cart:get-chr4 bank))))))
 
 (defun mmc1-chr-bank1 (d)
   (when (eql chr-mode'switch-4)
-    (ppu:write-chr1 (subseq (cart:get-chr d) 0 4096))))
+    (ppu:write-chr1 (cart:get-chr4 d))))
 
 (defun mmc1-prg-bank (d)
   (case prg-mode
