@@ -1,6 +1,6 @@
 (defpackage :cart
   (:use :cl)
-  (:export :get-prg :get-chr :read-ines :*mirror* :+chr-size+ :*prg-count* :*chr-count*))
+  (:export :get-prg :get-chr :get-chr4 :read-ines :*mirror* :+chr-size+ :*prg-count* :*chr-count*))
 
 (in-package :cart)
 
@@ -23,6 +23,7 @@
 
 (mk/get get-prg *prg-count* *prg* +prg-size+) ;получить PRG банк
 (mk/get get-chr *chr-count* *chr* +chr-size+) ;получить CHR банк
+(mk/get get-chr4 *chr-count* *chr* (ash +chr-size+ -1)) ;получить CHR банк
 
 (defun read4 (in)
   "Прочитать 4 байта"
